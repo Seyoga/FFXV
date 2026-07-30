@@ -27,6 +27,7 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 import org.joml.Vector3f;
 import ru.siyoga.legacyofthelucii.LegacyOfTheLucii;
+import ru.siyoga.legacyofthelucii.entity.ArdynBarrageWeaponEntity;
 import ru.siyoga.legacyofthelucii.legacy.LuciiLegacy;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerState;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerStates;
@@ -297,12 +298,10 @@ public final class RoyalArmsWarpStrikeAbility {
                 .subtract(look.multiply(0.85D));
         Vec3d target = barrageTarget(world, player, look, right, side, pattern);
 
-        ItemEntity itemEntity = new ItemEntity(world, start.x, start.y, start.z, stack);
-        itemEntity.setPickupDelay(32767);
-        itemEntity.setNoGravity(true);
-        itemEntity.setInvulnerable(true);
-        world.spawnEntity(itemEntity);
-        barrage.projectiles.add(new BarrageProjectile(itemEntity, stack, start, target, ARDYN_BARRAGE_PROJECTILE_TICKS));
+        Vec3d velocity = target.subtract(start).multiply(1.0D / ARDYN_BARRAGE_PROJECTILE_TICKS);
+        ArdynBarrageWeaponEntity weapon = new ArdynBarrageWeaponEntity(world, stack, start, velocity);
+        world.spawnEntity(weapon);
+        barrage.projectiles.add(new BarrageProjectile(weapon, stack, target, ARDYN_BARRAGE_PROJECTILE_TICKS));
     }
 
     private static void tickArdynBarrageProjectiles(ServerWorld world, ServerPlayerEntity player, ActiveArdynBarrage barrage) {
@@ -310,27 +309,27 @@ public final class RoyalArmsWarpStrikeAbility {
         while (iterator.hasNext()) {
             BarrageProjectile projectile = iterator.next();
             projectile.age++;
-            double progress = Math.min(1.0D, projectile.age / (double) projectile.totalTicks);
             Vec3d previous = projectile.previousPos;
-            Vec3d next = projectile.start.lerp(projectile.target, progress);
+            if (projectile.entity == null || projectile.entity.isRemoved()) {
+                iterator.remove();
+                continue;
+            }
+
+            Vec3d next = projectile.entity.getPos();
             projectile.previousPos = next;
 
-            if (projectile.entity != null && !projectile.entity.isRemoved()) {
-                projectile.entity.refreshPositionAndAngles(next.x, next.y, next.z, projectile.entity.getYaw() + 42.0F, projectile.entity.getPitch());
-                projectile.entity.setVelocity(next.subtract(previous));
-            }
             spawnArdynBarrageTrail(world, previous, next);
             LivingEntity hitEntity = barrageHitTarget(player, world, previous, next);
             if (hitEntity != null) {
                 Vec3d hitPos = hitEntity.getBoundingBox().getCenter()
                         .add((world.random.nextDouble() - 0.5D) * 0.55D, (world.random.nextDouble() - 0.5D) * 0.75D, (world.random.nextDouble() - 0.5D) * 0.55D);
                 hitEntity.damage(player.getDamageSources().playerAttack(player), barrageDamageFor(projectile.stack));
-                lodgeBarrageProjectile(barrage, projectile, hitPos);
+                lodgeBarrageProjectileInEntity(barrage, projectile, hitEntity, hitPos);
                 iterator.remove();
                 continue;
             }
 
-            if (progress >= 1.0D) {
+            if (projectile.age >= projectile.totalTicks) {
                 lodgeBarrageProjectile(barrage, projectile, next);
                 iterator.remove();
             }
@@ -339,9 +338,9 @@ public final class RoyalArmsWarpStrikeAbility {
 
     private static void tickArdynBarrageReturns(ServerWorld world, ServerPlayerEntity player, ActiveArdynBarrage barrage) {
         Vec3d center = player.getPos().add(0.0D, 1.0D, 0.0D);
-        Iterator<ItemEntity> iterator = barrage.lodgedItems.iterator();
+        Iterator<ArdynBarrageWeaponEntity> iterator = barrage.lodgedItems.iterator();
         while (iterator.hasNext()) {
-            ItemEntity item = iterator.next();
+            ArdynBarrageWeaponEntity item = iterator.next();
             if (item == null || item.isRemoved()) {
                 iterator.remove();
                 continue;
@@ -354,8 +353,7 @@ public final class RoyalArmsWarpStrikeAbility {
                 item.discard();
                 iterator.remove();
             } else {
-                Vec3d next = pos.add(toPlayer.normalize().multiply(0.55D + world.random.nextDouble() * 0.2D));
-                item.refreshPositionAndAngles(next.x, next.y, next.z, item.getYaw() + 38.0F, item.getPitch());
+                item.recallTo(player);
             }
         }
     }
@@ -423,8 +421,16 @@ public final class RoyalArmsWarpStrikeAbility {
 
     private static void lodgeBarrageProjectile(ActiveArdynBarrage barrage, BarrageProjectile projectile, Vec3d pos) {
         if (projectile.entity != null && !projectile.entity.isRemoved()) {
-            projectile.entity.refreshPositionAndAngles(pos.x, pos.y, pos.z, projectile.entity.getYaw(), projectile.entity.getPitch());
-            projectile.entity.setVelocity(Vec3d.ZERO);
+            Vec3d direction = pos.subtract(projectile.previousPos);
+            projectile.entity.stickInBlock(pos, direction);
+            barrage.lodgedItems.add(projectile.entity);
+        }
+    }
+
+    private static void lodgeBarrageProjectileInEntity(ActiveArdynBarrage barrage, BarrageProjectile projectile, Entity target, Vec3d pos) {
+        if (projectile.entity != null && !projectile.entity.isRemoved()) {
+            Vec3d direction = pos.subtract(projectile.previousPos);
+            projectile.entity.stickInEntity(target, pos, direction);
             barrage.lodgedItems.add(projectile.entity);
         }
     }
@@ -444,7 +450,7 @@ public final class RoyalArmsWarpStrikeAbility {
                 projectile.entity.discard();
             }
         }
-        for (ItemEntity item : barrage.lodgedItems) {
+        for (ArdynBarrageWeaponEntity item : barrage.lodgedItems) {
             if (item != null && !item.isRemoved()) {
                 item.discard();
             }
@@ -862,7 +868,7 @@ public final class RoyalArmsWarpStrikeAbility {
         private final ServerWorld world;
         private final List<ItemStack> stacks;
         private final List<BarrageProjectile> projectiles = new ArrayList<>();
-        private final List<ItemEntity> lodgedItems = new ArrayList<>();
+        private final List<ArdynBarrageWeaponEntity> lodgedItems = new ArrayList<>();
         private int age;
         private int shotIndex;
         private boolean finalImpactDone;
@@ -882,20 +888,18 @@ public final class RoyalArmsWarpStrikeAbility {
     }
 
     private static final class BarrageProjectile {
-        private final ItemEntity entity;
+        private final ArdynBarrageWeaponEntity entity;
         private final ItemStack stack;
-        private final Vec3d start;
         private final Vec3d target;
         private Vec3d previousPos;
         private final int totalTicks;
         private int age;
 
-        private BarrageProjectile(ItemEntity entity, ItemStack stack, Vec3d start, Vec3d target, int totalTicks) {
+        private BarrageProjectile(ArdynBarrageWeaponEntity entity, ItemStack stack, Vec3d target, int totalTicks) {
             this.entity = entity;
             this.stack = stack;
-            this.start = start;
             this.target = target;
-            this.previousPos = start;
+            this.previousPos = entity.getPos();
             this.totalTicks = totalTicks;
         }
     }

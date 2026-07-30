@@ -3,6 +3,7 @@ package ru.siyoga.legacyofthelucii.client;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.render.block.entity.BlockEntityRendererFactories;
@@ -19,8 +20,10 @@ import ru.siyoga.legacyofthelucii.client.royalarms.ardyn.ArdynShadowStepClient;
 import ru.siyoga.legacyofthelucii.client.royalarms.bind.RoyalArmsBindClient;
 import ru.siyoga.legacyofthelucii.client.royalarms.wall.RoyalArmsWallAnimations;
 import ru.siyoga.legacyofthelucii.client.royalarms.wall.RoyalArmsWallBlockEntityRenderer;
+import ru.siyoga.legacyofthelucii.client.royalarms.warp.ArdynBarrageWeaponEntityRenderer;
 import ru.siyoga.legacyofthelucii.client.royalarms.warp.RoyalArmsWarpTrailClient;
 import ru.siyoga.legacyofthelucii.client.state.ClientLuciiState;
+import ru.siyoga.legacyofthelucii.entity.LegacyEntities;
 import ru.siyoga.legacyofthelucii.legacy.LuciiLegacy;
 import ru.siyoga.legacyofthelucii.network.LuciiNetwork;
 
@@ -126,5 +129,6 @@ public final class LegacyOfTheLuciiClient implements ClientModInitializer {
         RoyalArmsBindClient.register();
         SkillTreeKeybindings.register();
         BlockEntityRendererFactories.register(LegacyBlocks.ROYAL_ARMS_WALL_BLOCK_ENTITY, RoyalArmsWallBlockEntityRenderer::new);
+        EntityRendererRegistry.register(LegacyEntities.ARDYN_BARRAGE_WEAPON, ArdynBarrageWeaponEntityRenderer::new);
     }
 }
