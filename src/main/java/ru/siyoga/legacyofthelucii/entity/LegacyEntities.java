@@ -13,10 +13,13 @@ public final class LegacyEntities {
     public static final EntityType<ArdynBarrageWeaponEntity> ARDYN_BARRAGE_WEAPON = Registry.register(
             Registries.ENTITY_TYPE,
             new Identifier(LegacyOfTheLucii.MOD_ID, "ardyn_barrage_weapon"),
-            FabricEntityTypeBuilder.<ArdynBarrageWeaponEntity>create(SpawnGroup.MISC, ArdynBarrageWeaponEntity::new)
+            FabricEntityTypeBuilder.create(SpawnGroup.MISC, ArdynBarrageWeaponEntity::new)
                     .dimensions(EntityDimensions.fixed(0.35F, 0.35F))
                     .trackRangeBlocks(96)
                     .trackedUpdateRate(1)
+                    .forceTrackedVelocityUpdates(true)
+                    .disableSaving()
+                    .disableSummon()
                     .build()
     );
 
@@ -24,6 +27,6 @@ public final class LegacyEntities {
     }
 
     public static void register() {
-        // Static initializer registers entity types.
+        LegacyOfTheLucii.LOGGER.info("Registering Legacy of the Lucii entities.");
     }
 }

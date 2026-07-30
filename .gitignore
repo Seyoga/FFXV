@@ -5,6 +5,7 @@ run/
 *.iml
 *.log
 *.log.gz
+gradle/wrapper/gradle-*-bin.zip
 
 # OS files
 Thumbs.db

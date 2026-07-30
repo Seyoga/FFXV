@@ -16,11 +16,11 @@ import ru.siyoga.legacyofthelucii.client.gui.skilltree.SkillTreeKeybindings;
 import ru.siyoga.legacyofthelucii.client.hud.LuciiHudOverlay;
 import ru.siyoga.legacyofthelucii.client.royalarms.RoyalArmsAbility;
 import ru.siyoga.legacyofthelucii.client.royalarms.RoyalArmsWallClient;
+import ru.siyoga.legacyofthelucii.client.royalarms.ardyn.ArdynBarrageWeaponRenderer;
 import ru.siyoga.legacyofthelucii.client.royalarms.ardyn.ArdynShadowStepClient;
 import ru.siyoga.legacyofthelucii.client.royalarms.bind.RoyalArmsBindClient;
 import ru.siyoga.legacyofthelucii.client.royalarms.wall.RoyalArmsWallAnimations;
 import ru.siyoga.legacyofthelucii.client.royalarms.wall.RoyalArmsWallBlockEntityRenderer;
-import ru.siyoga.legacyofthelucii.client.royalarms.warp.ArdynBarrageWeaponEntityRenderer;
 import ru.siyoga.legacyofthelucii.client.royalarms.warp.RoyalArmsWarpTrailClient;
 import ru.siyoga.legacyofthelucii.client.state.ClientLuciiState;
 import ru.siyoga.legacyofthelucii.entity.LegacyEntities;
@@ -128,7 +128,7 @@ public final class LegacyOfTheLuciiClient implements ClientModInitializer {
         ArdynShadowStepClient.register();
         RoyalArmsBindClient.register();
         SkillTreeKeybindings.register();
+        EntityRendererRegistry.register(LegacyEntities.ARDYN_BARRAGE_WEAPON, ArdynBarrageWeaponRenderer::new);
         BlockEntityRendererFactories.register(LegacyBlocks.ROYAL_ARMS_WALL_BLOCK_ENTITY, RoyalArmsWallBlockEntityRenderer::new);
-        EntityRendererRegistry.register(LegacyEntities.ARDYN_BARRAGE_WEAPON, ArdynBarrageWeaponEntityRenderer::new);
     }
 }

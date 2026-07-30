@@ -28,6 +28,7 @@ import net.minecraft.world.RaycastContext;
 import org.joml.Vector3f;
 import ru.siyoga.legacyofthelucii.LegacyOfTheLucii;
 import ru.siyoga.legacyofthelucii.entity.ArdynBarrageWeaponEntity;
+import ru.siyoga.legacyofthelucii.entity.LegacyEntities;
 import ru.siyoga.legacyofthelucii.legacy.LuciiLegacy;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerState;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerStates;
@@ -60,13 +61,15 @@ public final class RoyalArmsWarpStrikeAbility {
     private static final int ARDYN_CHARGE_TICKS = 14;
     private static final int ARDYN_BARRAGE_CHARGES_REQUIRED = 12;
     private static final int ARDYN_BARRAGE_FIRE_TICKS = 80;
-    private static final int ARDYN_BARRAGE_RETURN_TICKS = 28;
+    private static final int ARDYN_BARRAGE_RETURN_TICKS = 100;
     private static final int ARDYN_BARRAGE_SHOT_INTERVAL = 2;
-    private static final int ARDYN_BARRAGE_PROJECTILE_TICKS = 4;
+    private static final int ARDYN_BARRAGE_MAX_FLIGHT_TICKS = 9;
+    private static final int ARDYN_BARRAGE_RECALL_MAX_DELAY = 72;
     private static final double ARDYN_BARRAGE_DISTANCE = 16.0D;
-    private static final double ARDYN_BARRAGE_SPREAD = 3.2D;
-    private static final double ARDYN_BARRAGE_SIDE_OFFSET = 1.8D;
-    private static final double ARDYN_BARRAGE_UP_OFFSET = 1.0D;
+    private static final double ARDYN_BARRAGE_PROJECTILE_SPEED = 1.85D;
+    private static final double ARDYN_BARRAGE_HORIZONTAL_SPREAD = 0.38D;
+    private static final double ARDYN_BARRAGE_VERTICAL_SPREAD = 0.24D;
+    private static final double ARDYN_BARRAGE_START_SIDE_RADIUS = 1.55D;
     private static final float ARDYN_BARRAGE_NORMAL_DAMAGE = 0.5F;
     private static final float ARDYN_BARRAGE_WEAPON_MULTIPLIER = 0.15F;
     private static final double ARDYN_ARC_HEIGHT = 0.3D;
@@ -255,7 +258,7 @@ public final class RoyalArmsWarpStrikeAbility {
             }
 
             barrage.age++;
-            tickArdynBarrageProjectiles(world, player, barrage);
+            barrage.weapons.removeIf(Entity::isRemoved);
             if (barrage.age <= ARDYN_BARRAGE_FIRE_TICKS) {
                 spawnArdynBarrageRingParticles(world, player);
                 if (barrage.age % ARDYN_BARRAGE_SHOT_INTERVAL == 1) {
@@ -275,9 +278,9 @@ public final class RoyalArmsWarpStrikeAbility {
                     impactPos = teleportPos;
                 }
                 damageArdynImpact(player, world, impactPos, barrageDamageFor(barrage.nextStack()) * 2.0F);
+                scheduleArdynBarrageRecall(world, barrage);
             }
 
-            tickArdynBarrageReturns(world, player, barrage);
             if (barrage.age >= ARDYN_BARRAGE_FIRE_TICKS + ARDYN_BARRAGE_RETURN_TICKS) {
                 cleanupArdynBarrage(barrage);
                 iterator.remove();
@@ -287,75 +290,74 @@ public final class RoyalArmsWarpStrikeAbility {
 
     private static void launchArdynBarrageShot(ServerWorld world, ServerPlayerEntity player, ActiveArdynBarrage barrage) {
         ItemStack stack = barrage.nextStack().copyWithCount(1);
+        if (stack.isEmpty()) {
+            return;
+        }
+
+        // Every shot samples the CURRENT view direction. This lets the player steer
+        // the barrage with the mouse without turning already-fired weapons into homing projectiles.
         Vec3d look = player.getRotationVec(1.0F).normalize();
-        Vec3d right = new Vec3d(-look.z, 0.0D, look.x).normalize();
+        Vec3d right = new Vec3d(-look.z, 0.0D, look.x);
+        if (right.lengthSquared() < 1.0E-6D) {
+            right = new Vec3d(1.0D, 0.0D, 0.0D);
+        } else {
+            right = right.normalize();
+        }
+        Vec3d up = right.crossProduct(look).normalize();
+
         int pattern = barrage.shotIndex++;
-        double side = ((pattern % 7) - 3) * (ARDYN_BARRAGE_SPREAD / 6.0D) + (world.random.nextDouble() - 0.5D) * 0.85D;
-        double height = ARDYN_BARRAGE_UP_OFFSET + ((pattern / 7) % 3) * 0.35D + world.random.nextDouble() * 0.35D;
+        double startBand = ((pattern % 5) - 2) / 2.0D;
+        double startSide = startBand * ARDYN_BARRAGE_START_SIDE_RADIUS
+                + (world.random.nextDouble() - 0.5D) * 0.45D;
+        double startHeight = 0.70D
+                + ((pattern / 5) % 4) * 0.38D
+                + world.random.nextDouble() * 0.22D;
         Vec3d start = player.getPos()
-                .add(0.0D, height, 0.0D)
-                .add(right.multiply(side + (pattern % 2 == 0 ? ARDYN_BARRAGE_SIDE_OFFSET : -ARDYN_BARRAGE_SIDE_OFFSET)))
-                .subtract(look.multiply(0.85D));
-        Vec3d target = barrageTarget(world, player, look, right, side, pattern);
+                .add(0.0D, startHeight, 0.0D)
+                .add(right.multiply(startSide))
+                .subtract(look.multiply(0.65D));
 
-        Vec3d velocity = target.subtract(start).multiply(1.0D / ARDYN_BARRAGE_PROJECTILE_TICKS);
-        ArdynBarrageWeaponEntity weapon = new ArdynBarrageWeaponEntity(world, stack, start, velocity);
-        world.spawnEntity(weapon);
-        barrage.projectiles.add(new BarrageProjectile(weapon, stack, target, ARDYN_BARRAGE_PROJECTILE_TICKS));
+        // Three samples averaged together give a center-heavy cone instead of a flat random square:
+        // most blades travel near the crosshair, but the outer shots intentionally miss.
+        double horizontalSpread = centeredSpread(world, ARDYN_BARRAGE_HORIZONTAL_SPREAD);
+        double verticalSpread = centeredSpread(world, ARDYN_BARRAGE_VERTICAL_SPREAD);
+        Vec3d direction = look
+                .add(right.multiply(horizontalSpread))
+                .add(up.multiply(verticalSpread))
+                .normalize();
+
+        ArdynBarrageWeaponEntity weapon = new ArdynBarrageWeaponEntity(LegacyEntities.ARDYN_BARRAGE_WEAPON, world);
+        weapon.setPosition(start.x, start.y, start.z);
+        weapon.configure(
+                player,
+                stack,
+                direction.multiply(ARDYN_BARRAGE_PROJECTILE_SPEED),
+                barrageDamageFor(stack),
+                ARDYN_BARRAGE_MAX_FLIGHT_TICKS
+        );
+        if (world.spawnEntity(weapon)) {
+            barrage.weapons.add(weapon);
+        }
     }
 
-    private static void tickArdynBarrageProjectiles(ServerWorld world, ServerPlayerEntity player, ActiveArdynBarrage barrage) {
-        Iterator<BarrageProjectile> iterator = barrage.projectiles.iterator();
-        while (iterator.hasNext()) {
-            BarrageProjectile projectile = iterator.next();
-            projectile.age++;
-            Vec3d previous = projectile.previousPos;
-            if (projectile.entity == null || projectile.entity.isRemoved()) {
-                iterator.remove();
-                continue;
-            }
+    private static void scheduleArdynBarrageRecall(ServerWorld world, ActiveArdynBarrage barrage) {
+        if (barrage.recallScheduled) {
+            return;
+        }
+        barrage.recallScheduled = true;
 
-            Vec3d next = projectile.entity.getPos();
-            projectile.previousPos = next;
-
-            spawnArdynBarrageTrail(world, previous, next);
-            LivingEntity hitEntity = barrageHitTarget(player, world, previous, next);
-            if (hitEntity != null) {
-                Vec3d hitPos = hitEntity.getBoundingBox().getCenter()
-                        .add((world.random.nextDouble() - 0.5D) * 0.55D, (world.random.nextDouble() - 0.5D) * 0.75D, (world.random.nextDouble() - 0.5D) * 0.55D);
-                hitEntity.damage(player.getDamageSources().playerAttack(player), barrageDamageFor(projectile.stack));
-                lodgeBarrageProjectileInEntity(barrage, projectile, hitEntity, hitPos);
-                iterator.remove();
-                continue;
-            }
-
-            if (projectile.age >= projectile.totalTicks) {
-                lodgeBarrageProjectile(barrage, projectile, next);
-                iterator.remove();
+        // Delays are shuffled independently so the field breaks apart in a chaotic order.
+        // The final ~28 ticks of the 5 second recall window are left for the curved flight itself.
+        for (ArdynBarrageWeaponEntity weapon : barrage.weapons) {
+            if (weapon != null && !weapon.isRemoved()) {
+                weapon.scheduleRecall(world.random.nextInt(ARDYN_BARRAGE_RECALL_MAX_DELAY + 1));
             }
         }
     }
 
-    private static void tickArdynBarrageReturns(ServerWorld world, ServerPlayerEntity player, ActiveArdynBarrage barrage) {
-        Vec3d center = player.getPos().add(0.0D, 1.0D, 0.0D);
-        Iterator<ArdynBarrageWeaponEntity> iterator = barrage.lodgedItems.iterator();
-        while (iterator.hasNext()) {
-            ArdynBarrageWeaponEntity item = iterator.next();
-            if (item == null || item.isRemoved()) {
-                iterator.remove();
-                continue;
-            }
-
-            Vec3d pos = item.getPos();
-            Vec3d toPlayer = center.subtract(pos);
-            world.spawnParticles(ARDYN_TRAIL_PARTICLE, pos.x, pos.y, pos.z, 3, 0.08D, 0.08D, 0.08D, 0.0D);
-            if (toPlayer.lengthSquared() < 0.28D || barrage.age % 3 == 0 && world.random.nextFloat() < 0.28F) {
-                item.discard();
-                iterator.remove();
-            } else {
-                item.recallTo(player);
-            }
-        }
+    private static double centeredSpread(ServerWorld world, double amount) {
+        double sample = (world.random.nextDouble() + world.random.nextDouble() + world.random.nextDouble()) / 3.0D;
+        return (sample - 0.5D) * 2.0D * amount;
     }
 
     private static Vec3d lookTarget(ServerWorld world, ServerPlayerEntity player, double distance) {
@@ -371,70 +373,6 @@ public final class RoyalArmsWarpStrikeAbility {
         return hit.getType() == HitResult.Type.MISS ? start.add(look.multiply(distance)) : hit.getPos();
     }
 
-    private static Vec3d barrageTarget(ServerWorld world, ServerPlayerEntity player, Vec3d look, Vec3d right, double side, int pattern) {
-        LivingEntity target = selectBarrageTarget(world, player, look, pattern);
-        if (target != null) {
-            return target.getBoundingBox().getCenter()
-                    .add(right.multiply((world.random.nextDouble() - 0.5D) * 0.75D))
-                    .add(0.0D, (world.random.nextDouble() - 0.5D) * 0.7D, 0.0D);
-        }
-
-        Vec3d eye = player.getEyePos();
-        Vec3d end = eye.add(look.multiply(ARDYN_BARRAGE_DISTANCE))
-                .add(right.multiply(side))
-                .add(0.0D, ((pattern % 5) - 2) * 0.35D, 0.0D);
-        HitResult hit = world.raycast(new RaycastContext(
-                eye,
-                end,
-                RaycastContext.ShapeType.COLLIDER,
-                RaycastContext.FluidHandling.NONE,
-                player
-        ));
-        return hit.getType() == HitResult.Type.MISS ? end : hit.getPos();
-    }
-
-    private static LivingEntity selectBarrageTarget(ServerWorld world, ServerPlayerEntity player, Vec3d look, int pattern) {
-        Box searchBox = player.getBoundingBox().stretch(look.multiply(ARDYN_BARRAGE_DISTANCE)).expand(6.0D, 3.0D, 6.0D);
-        List<LivingEntity> targets = world.getEntitiesByClass(LivingEntity.class, searchBox, entity -> canDamage(player, entity)
-                && entity.getBoundingBox().getCenter().subtract(player.getEyePos()).normalize().dotProduct(look) > 0.45D);
-        if (targets.isEmpty() || pattern % 4 == 0) {
-            return null;
-        }
-        return targets.get(Math.floorMod(pattern + world.random.nextInt(targets.size()), targets.size()));
-    }
-
-    private static LivingEntity barrageHitTarget(ServerPlayerEntity player, ServerWorld world, Vec3d from, Vec3d to) {
-        Box searchBox = new Box(from, to).expand(0.65D);
-        LivingEntity closest = null;
-        double closestDistance = Double.MAX_VALUE;
-        for (LivingEntity target : world.getEntitiesByClass(LivingEntity.class, searchBox, entity -> canDamage(player, entity))) {
-            if (target.getBoundingBox().expand(0.45D).raycast(from, to).isPresent()) {
-                double distance = target.squaredDistanceTo(from);
-                if (distance < closestDistance) {
-                    closestDistance = distance;
-                    closest = target;
-                }
-            }
-        }
-        return closest;
-    }
-
-    private static void lodgeBarrageProjectile(ActiveArdynBarrage barrage, BarrageProjectile projectile, Vec3d pos) {
-        if (projectile.entity != null && !projectile.entity.isRemoved()) {
-            Vec3d direction = pos.subtract(projectile.previousPos);
-            projectile.entity.stickInBlock(pos, direction);
-            barrage.lodgedItems.add(projectile.entity);
-        }
-    }
-
-    private static void lodgeBarrageProjectileInEntity(ActiveArdynBarrage barrage, BarrageProjectile projectile, Entity target, Vec3d pos) {
-        if (projectile.entity != null && !projectile.entity.isRemoved()) {
-            Vec3d direction = pos.subtract(projectile.previousPos);
-            projectile.entity.stickInEntity(target, pos, direction);
-            barrage.lodgedItems.add(projectile.entity);
-        }
-    }
-
     private static float barrageDamageFor(ItemStack stack) {
         float weaponDamage = weaponAttackDamage(stack);
         if (stack.isIn(ROYAL_ARMS_WEAPONS) || weaponDamage > 0.0F) {
@@ -445,18 +383,12 @@ public final class RoyalArmsWarpStrikeAbility {
     }
 
     private static void cleanupArdynBarrage(ActiveArdynBarrage barrage) {
-        for (BarrageProjectile projectile : barrage.projectiles) {
-            if (projectile.entity != null && !projectile.entity.isRemoved()) {
-                projectile.entity.discard();
+        for (ArdynBarrageWeaponEntity weapon : barrage.weapons) {
+            if (weapon != null && !weapon.isRemoved()) {
+                weapon.discard();
             }
         }
-        for (ArdynBarrageWeaponEntity item : barrage.lodgedItems) {
-            if (item != null && !item.isRemoved()) {
-                item.discard();
-            }
-        }
-        barrage.projectiles.clear();
-        barrage.lodgedItems.clear();
+        barrage.weapons.clear();
         LuciiNetwork.broadcastArdynBarrage(barrage.world, barrage.ownerUuid, false);
     }
 
@@ -867,11 +799,11 @@ public final class RoyalArmsWarpStrikeAbility {
         private final UUID ownerUuid;
         private final ServerWorld world;
         private final List<ItemStack> stacks;
-        private final List<BarrageProjectile> projectiles = new ArrayList<>();
-        private final List<ArdynBarrageWeaponEntity> lodgedItems = new ArrayList<>();
+        private final List<ArdynBarrageWeaponEntity> weapons = new ArrayList<>();
         private int age;
         private int shotIndex;
         private boolean finalImpactDone;
+        private boolean recallScheduled;
 
         private ActiveArdynBarrage(UUID ownerUuid, ServerWorld world, List<ItemStack> stacks) {
             this.ownerUuid = ownerUuid;
@@ -884,23 +816,6 @@ public final class RoyalArmsWarpStrikeAbility {
                 return ItemStack.EMPTY;
             }
             return stacks.get(Math.floorMod(shotIndex, stacks.size()));
-        }
-    }
-
-    private static final class BarrageProjectile {
-        private final ArdynBarrageWeaponEntity entity;
-        private final ItemStack stack;
-        private final Vec3d target;
-        private Vec3d previousPos;
-        private final int totalTicks;
-        private int age;
-
-        private BarrageProjectile(ArdynBarrageWeaponEntity entity, ItemStack stack, Vec3d target, int totalTicks) {
-            this.entity = entity;
-            this.stack = stack;
-            this.target = target;
-            this.previousPos = entity.getPos();
-            this.totalTicks = totalTicks;
         }
     }
 
