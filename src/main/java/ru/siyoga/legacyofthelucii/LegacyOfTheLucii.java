@@ -17,6 +17,7 @@ import net.minecraft.util.Identifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.siyoga.legacyofthelucii.block.LegacyBlocks;
+import ru.siyoga.legacyofthelucii.entity.LegacyEntities;
 import ru.siyoga.legacyofthelucii.item.LegacyItems;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerState;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerStates;
@@ -36,6 +37,7 @@ public final class LegacyOfTheLucii implements ModInitializer {
     @Override
     public void onInitialize() {
         LegacyBlocks.register();
+        LegacyEntities.register();
         LegacyItems.register();
         ServerPlayNetworking.registerGlobalReceiver(ROYAL_ARMS_EQUIP_PACKET, LegacyOfTheLucii::handleRoyalArmsEquip);
         ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.ROYAL_ARMS_TOGGLE_PACKET, LegacyOfTheLucii::handleRoyalArmsToggle);

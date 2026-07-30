@@ -739,6 +739,7 @@ public final class RoyalArmsAbility {
             }
         } else {
             ardynBarrageOwners.remove(ownerUuid);
+            restartAuraAppearance(ownerUuid);
         }
     }
 
