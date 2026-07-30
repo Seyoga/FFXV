@@ -1,0 +1,25 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "WSW",
+    "RCR",
+    "WWW"
+  ],
+  "key": {
+    "C": {
+      "item": "legacyofthelucii:ring_of_the_lucii"
+    },
+    "R": {
+      "item": "minecraft:echo_shard"
+    },
+    "S": {
+      "item": "minecraft:nether_star"
+    },
+    "W": {
+      "item": "minecraft:wither_skeleton_skull"
+    }
+  },
+  "result": {
+    "item": "legacyofthelucii:scourged_lucii_ring"
+  }
+}
