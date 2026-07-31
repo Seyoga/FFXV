@@ -57,9 +57,25 @@ public final class RoyalArmsAbility {
     private static final float ITEM_SPIN_SPEED = 3.0F;
     private static final int APPEAR_TICKS = 24;
     private static final int DISAPPEAR_TICKS = 24;
-    private static final int GUARD_BLOCK_TICKS = 10;
     private static final int INVENTORY_REFRESH_TICKS = 10;
     private static final int ATTACK_EQUIP_COOLDOWN_TICKS = 5;
+    // BEGIN PHANTOM_GUARD_THREE_LAYER_V7 CONSTANTS
+    private static final int GUARD_LAYER_UPPER = 0;
+    private static final int GUARD_LAYER_MIDDLE = 1;
+    private static final int GUARD_LAYER_LOWER = 2;
+    private static final int GUARD_LAYER_COUNT = 3;
+    private static final int GUARD_MAX_APPROACH_TICKS = 6;
+    private static final float GUARD_FORMATION_LERP = 0.16F;
+    private static final double GUARD_UPPER_Y_OFFSET = 1.62D;
+    private static final double GUARD_MIDDLE_Y_OFFSET = 1.02D;
+    private static final double GUARD_LOWER_Y_OFFSET = 0.42D;
+    private static final double GUARD_BOB_HEIGHT = 0.06D;
+    private static final int EXPLOSION_GUARD_HOLD_TICKS = 8;
+    private static final int EXPLOSION_GUARD_SPIN_TICKS = 52;
+    private static final float EXPLOSION_GUARD_BASE_EXTRA_SPEED = 18.0F;
+    private static final float EXPLOSION_GUARD_EXTRA_SPEED_PER_ITEM = 1.8F;
+    private static final float EXPLOSION_GUARD_MAX_EXTRA_SPEED = 31.0F;
+    // END PHANTOM_GUARD_THREE_LAYER_V7 CONSTANTS
     private static final String CATEGORY = "key.categories.legacyofthelucii";
 
     private static KeyBinding toggleKey;
@@ -68,7 +84,16 @@ public final class RoyalArmsAbility {
     private static final List<FloatingItem> floatingItems = new ArrayList<>();
     private static final Map<UUID, RemoteRoyalArmsVisual> remoteVisuals = new HashMap<>();
     private static final List<UUID> ardynBarrageOwners = new ArrayList<>();
-    private static final List<GuardBlockVisual> guardBlockVisuals = new ArrayList<>();
+    private static final Map<OwnerLayerKey, GuardOrbitBoost> guardLayerBoosts = new HashMap<>();
+    private static final Map<UUID, float[]> guardLayerOffsets = new HashMap<>();
+    private static final Map<UUID, float[]> previousGuardLayerOffsets = new HashMap<>();
+    private static final Map<UUID, ExplosionGuardOrbit> explosionGuardOrbits = new HashMap<>();
+    private static final Map<UUID, Float> remoteExplosionOrbitOffsets = new HashMap<>();
+    private static final Map<UUID, Float> previousRemoteExplosionOrbitOffsets = new HashMap<>();
+    private static final Map<UUID, Float> remoteGuardFormationProgress = new HashMap<>();
+    private static final Map<UUID, Float> previousRemoteGuardFormationProgress = new HashMap<>();
+    private static float localGuardFormationProgress;
+    private static float previousLocalGuardFormationProgress;
     private static boolean lastActive;
     private static RoyalArmsInventoryFilter currentFilter = RoyalArmsInventoryFilter.ALL;
     private static Vec3d lastPlayerPos;
@@ -142,10 +167,11 @@ public final class RoyalArmsAbility {
             if (active) {
                 clearAura();
                 rebuildAura(client);
-                sendActionbar(client, "Royal Arms: active");
             } else {
                 startClosingAura();
-                sendActionbar(client, "Royal Arms: inactive");
+                if (client.player != null) {
+                    clearGuardCombatEffects(client.player.getUuid());
+                }
             }
             toggleLockTicks = Math.max(toggleLockTicks, toggleLockDuration(active));
             lastActive = active;
@@ -153,7 +179,9 @@ public final class RoyalArmsAbility {
 
         tickClosingAura();
         tickRemoteVisuals();
-        tickGuardBlocks();
+        tickGuardFormationProgress(client);
+        advanceGuardLayerBoosts();
+        tickRemoteExplosionEffects(client.player == null ? null : client.player.getUuid());
 
         if (client.player != null && client.world != null && (active || hasClosingLocalItems())) {
             updateLocalPlayerPosition(client);
@@ -166,10 +194,25 @@ public final class RoyalArmsAbility {
         updateOrbitSpeedState(client);
         previousOrbitTime = orbitTime;
         previousItemSpinAngle = itemSpinAngle;
-        float orbitSpeed = currentOrbitSpeed(client);
-        orbitTime += orbitSpeed;
-        if (orbitSpeed != 0.0F) {
-            itemSpinAngle = (itemSpinAngle + ITEM_SPIN_SPEED) % 360.0F;
+        boolean transitioning = hasTransitioningLocalItems();
+        UUID localOwnerUuid = client.player.getUuid();
+        float normalOrbitSpeed = currentOrbitSpeed(client);
+        boolean explosionActive = explosionGuardOrbits.containsKey(localOwnerUuid);
+        float orbitDelta = advanceLocalExplosionGuardOrbit(localOwnerUuid, normalOrbitSpeed);
+        float layerMotion = maxGuardLayerMotion(localOwnerUuid);
+
+        if (!transitioning || explosionActive) {
+            orbitTime += orbitDelta;
+        }
+
+        float visualMotion = Math.max(Math.abs(orbitDelta), layerMotion);
+        if (visualMotion > 0.001F) {
+            float spinMultiplier = MathHelper.clamp(
+                    visualMotion / Math.max(1.0F, normalOrbitSpeed),
+                    1.0F,
+                    5.0F
+            );
+            itemSpinAngle = (itemSpinAngle + ITEM_SPIN_SPEED * spinMultiplier) % 360.0F;
         }
 
         if (attackEquipCooldown > 0) {
@@ -191,9 +234,20 @@ public final class RoyalArmsAbility {
 
             item.innerTarget = shouldUseArdynInnerRing(ClientLuciiState.legacy(), charges, item.index, floatingItems.size());
             item.innerProgress = MathHelper.lerp(0.12F, item.innerProgress, item.innerTarget ? 1.0F : 0.0F);
-            item.targetAngle = getRingAngleDegrees(ClientLuciiState.legacy(), charges, item.index, floatingItems.size());
+            float normalTargetAngle = getRingAngleDegrees(
+                    ClientLuciiState.legacy(),
+                    charges,
+                    item.index,
+                    floatingItems.size()
+            );
+            float guardTargetAngle = getGuardRingAngleDegrees(item.index, floatingItems.size());
+            item.targetAngle = lerpAngleDegrees(
+                    normalTargetAngle,
+                    guardTargetAngle,
+                    localGuardFormationProgress
+            );
             float diff = MathHelper.wrapDegrees(item.targetAngle - item.angle);
-            item.angle += diff * 0.12F;
+            item.angle += diff * 0.18F;
             item.highlightScale = MathHelper.lerp(0.16F, item.highlightScale, item == targetedItem ? TARGET_ITEM_SCALE : 1.0F);
             item.spawnTicks = Math.min(APPEAR_TICKS, item.spawnTicks + 1);
         }
@@ -279,11 +333,15 @@ public final class RoyalArmsAbility {
         }
 
         Vec3d cameraPos = context.camera().getPos();
-        float tickDelta = context.tickDelta();
+        float tickDelta = client.isPaused() ? 0.0F : context.tickDelta();
         float time = MathHelper.lerp(tickDelta, previousOrbitTime, orbitTime);
-        float spinAngle = previousItemSpinAngle
-                + MathHelper.wrapDegrees(itemSpinAngle - previousItemSpinAngle) * tickDelta;
+        float spinAngle = MathHelper.lerp(tickDelta, previousItemSpinAngle, itemSpinAngle);
         float spinTime = client.world.getTime() + tickDelta;
+        float localGuardProgress = MathHelper.lerp(
+                tickDelta,
+                previousLocalGuardFormationProgress,
+                localGuardFormationProgress
+        );
 
         if (!floatingItems.isEmpty()
                 && lastPlayerPos != null
@@ -291,14 +349,38 @@ public final class RoyalArmsAbility {
                 && !RoyalArmsBindClient.isBinding(client.player.getUuid())
                 && !ardynBarrageOwners.contains(client.player.getUuid())) {
             Vec3d playerPos = lastPlayerPos.lerp(currentPlayerPos, tickDelta);
+            UUID ownerUuid = client.player.getUuid();
+            int total = floatingItems.size();
             for (FloatingItem item : floatingItems) {
-                Vec3d itemPos = getItemPosition(item, playerPos, time, tickDelta, ClientLuciiState.legacy(), ClientLuciiState.ardynWarpCharges(), floatingItems.size());
-                renderFloatingItem(context, item, itemPos, cameraPos, playerPos, spinAngle, tickDelta);
+                int layer = guardLayerForIndex(item.index);
+                float itemTime = time + interpolatedGuardLayerOffset(
+                        ownerUuid,
+                        layer,
+                        tickDelta
+                ) * localGuardProgress;
+                Vec3d itemPos = getItemPosition(
+                        item,
+                        playerPos,
+                        itemTime,
+                        tickDelta,
+                        ClientLuciiState.legacy(),
+                        ClientLuciiState.ardynWarpCharges(),
+                        total,
+                        localGuardProgress
+                );
+                renderFloatingItem(
+                        context,
+                        item,
+                        itemPos,
+                        cameraPos,
+                        playerPos,
+                        spinAngle,
+                        tickDelta
+                );
             }
         }
 
         renderRemoteVisuals(context, client, cameraPos, spinTime, tickDelta);
-        renderGuardBlocks(context, cameraPos, tickDelta);
     }
 
     private static void renderFloatingItem(
@@ -383,15 +465,38 @@ public final class RoyalArmsAbility {
             }
 
             Vec3d playerPos = getInterpolatedPlayerPos(owner, tickDelta);
-            float time = spinTime * remoteOrbitSpeed(owner);
+            UUID ownerUuid = entry.getKey();
+            float baseTime = spinTime * remoteOrbitSpeed(owner)
+                    + interpolatedRemoteExplosionOrbitOffset(ownerUuid, tickDelta);
+            float guardProgress = interpolatedRemoteGuardFormationProgress(
+                    ownerUuid,
+                    tickDelta
+            );
             int total = visual.items.size();
             LegacyPalette palette = LegacyPalette.forLegacy(visual.legacy);
             for (int i = 0; i < total; i++) {
+                int index = i + 1;
+                int layer = guardLayerForIndex(index);
+                float itemTime = baseTime + interpolatedGuardLayerOffset(
+                        ownerUuid,
+                        layer,
+                        tickDelta
+                ) * guardProgress;
                 ItemStack stack = visual.items.get(i).stack;
                 RemoteFloatingItem item = visual.items.get(i);
-                item.innerTarget = shouldUseArdynInnerRing(visual.legacy, visual.ardynWarpCharges, i + 1, total);
+                item.innerTarget = shouldUseArdynInnerRing(visual.legacy, visual.ardynWarpCharges, index, total);
                 item.innerProgress = MathHelper.lerp(0.12F, item.innerProgress, item.innerTarget ? 1.0F : 0.0F);
-                Vec3d itemPos = getRemoteItemPosition(item, i + 1, playerPos, time, tickDelta, visual.legacy, visual.ardynWarpCharges, total);
+                Vec3d itemPos = getRemoteItemPosition(
+                        item,
+                        index,
+                        playerPos,
+                        itemTime,
+                        tickDelta,
+                        visual.legacy,
+                        visual.ardynWarpCharges,
+                        total,
+                        guardProgress
+                );
                 double dx = itemPos.x - playerPos.x;
                 double dz = itemPos.z - playerPos.z;
                 float lookAngle = item.closeTicks > 0 ? item.closeLookAngle : (float) Math.toDegrees(Math.atan2(dx, dz));
@@ -402,26 +507,6 @@ public final class RoyalArmsAbility {
                 int seed = (i + 1) * 31 + Registries.ITEM.getId(stack.getItem()).hashCode();
                 renderItemPass(context, stack, seed, itemPos, cameraPos, lookAngle, spin, ITEM_BASE_SCALE * item.visualScale(tickDelta), palette.baseTint);
             }
-        }
-    }
-
-    private static void renderGuardBlocks(WorldRenderContext context, Vec3d cameraPos, float tickDelta) {
-        if (guardBlockVisuals.isEmpty()) {
-            return;
-        }
-
-        LegacyPalette palette = LegacyPalette.forLegacy(LuciiLegacy.NOCTIS);
-        for (GuardBlockVisual visual : new ArrayList<>(guardBlockVisuals)) {
-            float progress = MathHelper.clamp((visual.age + tickDelta) / (float) GUARD_BLOCK_TICKS, 0.0F, 1.0F);
-            float scale = 1.18F * (1.0F - easeInOutCubic(progress) * 0.35F);
-            float alpha = 0.74F * (1.0F - progress);
-            RenderTint tint = new RenderTint(
-                    palette.targetTint.red,
-                    palette.targetTint.green,
-                    palette.targetTint.blue,
-                    alpha
-            );
-            renderItemPass(context, visual.stack, visual.seed, visual.pos, cameraPos, visual.lookAngle, visual.spinAngle, scale, tint);
         }
     }
 
@@ -496,35 +581,116 @@ public final class RoyalArmsAbility {
         return items;
     }
 
-    private static Vec3d getItemPosition(FloatingItem item, Vec3d playerPos, float time, float tickDelta, LuciiLegacy legacy, int charges, int total) {
+    private static Vec3d getItemPosition(
+            FloatingItem item,
+            Vec3d playerPos,
+            float time,
+            float tickDelta,
+            LuciiLegacy legacy,
+            int charges,
+            int total,
+            float guardProgress
+    ) {
+        float effectiveGuardProgress = legacy == LuciiLegacy.NOCTIS
+                ? MathHelper.clamp(guardProgress, 0.0F, 1.0F)
+                : 0.0F;
         float direction = item.innerTarget ? -ARDYN_INNER_RING_SPEED_MULTIPLIER : 1.0F;
         float animationAngle = item.closing
                 ? item.closeAngle
                 : item.angle + time * direction;
         double angle = Math.toRadians(animationAngle);
-        double ringRadius = MathHelper.lerp(item.innerProgress, (float) RADIUS, (float) INNER_RADIUS);
-        double radius = ringRadius * item.radiusProgress(tickDelta);
+        double normalRingRadius = MathHelper.lerp(
+                item.innerProgress,
+                (float) RADIUS,
+                (float) INNER_RADIUS
+        );
+        double ringRadius = MathHelper.lerp(
+                effectiveGuardProgress,
+                (float) normalRingRadius,
+                (float) INNER_RADIUS
+        );
+        double radiusProgress = item.radiusProgress(tickDelta);
+        double radius = ringRadius * radiusProgress;
         double x = Math.sin(angle) * radius;
         double z = Math.cos(angle) * radius;
+
         float positionTime = item.closing ? item.closeTime : time;
-        double y = ORBIT_Y_OFFSET + Math.sin(positionTime * 0.05F + item.index) * BOB_HEIGHT * item.radiusProgress(tickDelta);
+        double normalY = ORBIT_Y_OFFSET
+                + Math.sin(positionTime * 0.05F + item.index)
+                * BOB_HEIGHT
+                * radiusProgress;
+        int layer = guardLayerForIndex(item.index);
+        double guardY = guardLayerYOffset(layer)
+                + Math.sin(positionTime * 0.045F + item.index * 0.8F)
+                * GUARD_BOB_HEIGHT
+                * radiusProgress;
+        double y = MathHelper.lerp(
+                effectiveGuardProgress,
+                (float) normalY,
+                (float) guardY
+        );
         return playerPos.add(x, y, z);
     }
 
-    private static Vec3d getRemoteItemPosition(RemoteFloatingItem item, int index, Vec3d playerPos, float time, float tickDelta, LuciiLegacy legacy, int charges, int total) {
+    private static Vec3d getRemoteItemPosition(
+            RemoteFloatingItem item,
+            int index,
+            Vec3d playerPos,
+            float time,
+            float tickDelta,
+            LuciiLegacy legacy,
+            int charges,
+            int total,
+            float guardProgress
+    ) {
+        float effectiveGuardProgress = legacy == LuciiLegacy.NOCTIS
+                ? MathHelper.clamp(guardProgress, 0.0F, 1.0F)
+                : 0.0F;
         float direction = item.innerTarget ? -ARDYN_INNER_RING_SPEED_MULTIPLIER : 1.0F;
+        float normalBaseAngle = getRingAngleDegrees(legacy, charges, index, total);
+        float guardBaseAngle = getGuardRingAngleDegrees(index, total);
+        float baseAngle = lerpAngleDegrees(
+                normalBaseAngle,
+                guardBaseAngle,
+                effectiveGuardProgress
+        );
         float animationAngle = item.closeTicks > 0
                 ? item.closeAngle
-                : getRingAngleDegrees(legacy, charges, index, total) + time * direction;
+                : baseAngle + time * direction;
         item.lastRenderedAngle = animationAngle;
         item.lastRenderedTime = time;
+
         double angle = Math.toRadians(animationAngle);
-        double ringRadius = MathHelper.lerp(item.innerProgress, (float) RADIUS, (float) INNER_RADIUS);
-        double radius = ringRadius * item.radiusProgress(tickDelta);
+        double normalRingRadius = MathHelper.lerp(
+                item.innerProgress,
+                (float) RADIUS,
+                (float) INNER_RADIUS
+        );
+        double ringRadius = MathHelper.lerp(
+                effectiveGuardProgress,
+                (float) normalRingRadius,
+                (float) INNER_RADIUS
+        );
+        double radiusProgress = item.radiusProgress(tickDelta);
+        double radius = ringRadius * radiusProgress;
         double x = Math.sin(angle) * radius;
         double z = Math.cos(angle) * radius;
+
         float positionTime = item.closeTicks > 0 ? item.closeTime : time;
-        double y = ORBIT_Y_OFFSET + Math.sin(positionTime * 0.05F + index) * BOB_HEIGHT * item.radiusProgress(tickDelta);
+        double normalY = ORBIT_Y_OFFSET
+                + Math.sin(positionTime * 0.05F + index)
+                * BOB_HEIGHT
+                * radiusProgress;
+        int layer = guardLayerForIndex(index);
+        double guardY = guardLayerYOffset(layer)
+                + Math.sin(positionTime * 0.045F + index * 0.8F)
+                * GUARD_BOB_HEIGHT
+                * radiusProgress;
+        double y = MathHelper.lerp(
+                effectiveGuardProgress,
+                (float) normalY,
+                (float) guardY
+        );
         return playerPos.add(x, y, z);
     }
 
@@ -546,8 +712,23 @@ public final class RoyalArmsAbility {
 
         FloatingItem bestItem = null;
         double bestScore = -999.0D;
+        UUID ownerUuid = client.player.getUuid();
+        int total = floatingItems.size();
         for (FloatingItem item : floatingItems) {
-            Vec3d itemPos = getItemPosition(item, currentPlayerPos, time, 1.0F, ClientLuciiState.legacy(), ClientLuciiState.ardynWarpCharges(), floatingItems.size());
+            int layer = guardLayerForIndex(item.index);
+            float itemTime = time
+                    + currentGuardLayerOffset(ownerUuid, layer)
+                    * localGuardFormationProgress;
+            Vec3d itemPos = getItemPosition(
+                    item,
+                    currentPlayerPos,
+                    itemTime,
+                    1.0F,
+                    ClientLuciiState.legacy(),
+                    ClientLuciiState.ardynWarpCharges(),
+                    total,
+                    localGuardFormationProgress
+            );
             double dx = itemPos.x - currentPlayerPos.x;
             double dz = itemPos.z - currentPlayerPos.z;
             double itemYaw = Math.toDegrees(Math.atan2(dx, dz));
@@ -637,6 +818,15 @@ public final class RoyalArmsAbility {
         return false;
     }
 
+    private static boolean hasTransitioningLocalItems() {
+        for (FloatingItem item : floatingItems) {
+            if (item.isTransitioning()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static void updateLocalPlayerPosition(MinecraftClient client) {
         Vec3d playerPos = client.player.getPos();
         if (currentPlayerPos == null) {
@@ -672,18 +862,8 @@ public final class RoyalArmsAbility {
 
         for (UUID uuid : finished) {
             remoteVisuals.remove(uuid);
+            clearGuardEffects(uuid);
         }
-    }
-
-    private static void tickGuardBlocks() {
-        if (guardBlockVisuals.isEmpty()) {
-            return;
-        }
-
-        for (GuardBlockVisual visual : guardBlockVisuals) {
-            visual.age++;
-        }
-        guardBlockVisuals.removeIf(GuardBlockVisual::finished);
     }
 
     private static void startClosingAura() {
@@ -692,10 +872,17 @@ public final class RoyalArmsAbility {
             return;
         }
 
+        MinecraftClient client = MinecraftClient.getInstance();
+        UUID ownerUuid = client.player == null ? null : client.player.getUuid();
         for (FloatingItem item : floatingItems) {
             item.closing = true;
             item.closeTicks = 0;
-            item.closeTime = orbitTime;
+            int layer = guardLayerForIndex(item.index);
+            float layerOffset = ownerUuid == null
+                    ? 0.0F
+                    : currentGuardLayerOffset(ownerUuid, layer)
+                    * localGuardFormationProgress;
+            item.closeTime = orbitTime + layerOffset;
             item.closeAngle = getItemAngle(item, item.closeTime);
             item.closeLookAngle = item.closeAngle;
             item.closeSpinAngle = (itemSpinAngle + item.spinPhase) % 360.0F;
@@ -720,8 +907,489 @@ public final class RoyalArmsAbility {
         sneakDoubleTapTicks = 0;
     }
 
+    public static void beginGuardBlock(
+            UUID ownerUuid,
+            Vec3d interceptPos,
+            Vec3d incomingVelocity,
+            int travelTicks,
+            int layer
+    ) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.player == null
+                || client.world == null
+                || layer < 0
+                || layer >= GUARD_LAYER_COUNT) {
+            return;
+        }
+
+        int durationTicks = MathHelper.clamp(
+                travelTicks,
+                1,
+                GUARD_MAX_APPROACH_TICKS
+        );
+        UUID selfUuid = client.player.getUuid();
+        if (ownerUuid.equals(selfUuid)) {
+            if (floatingItems.isEmpty()) {
+                return;
+            }
+
+            Vec3d playerPos = currentPlayerPos == null
+                    ? client.player.getPos()
+                    : currentPlayerPos;
+            float targetAngle = guardAngleDegrees(interceptPos, playerPos);
+            List<Float> itemAngles = new ArrayList<>();
+            int total = floatingItems.size();
+            float layerOffset = currentGuardLayerOffset(ownerUuid, layer)
+                    * localGuardFormationProgress;
+            for (FloatingItem item : floatingItems) {
+                if (item.closing || guardLayerForIndex(item.index) != layer) {
+                    continue;
+                }
+
+                Vec3d itemPos = getItemPosition(
+                        item,
+                        playerPos,
+                        orbitTime + layerOffset,
+                        1.0F,
+                        ClientLuciiState.legacy(),
+                        ClientLuciiState.ardynWarpCharges(),
+                        total,
+                        localGuardFormationProgress
+                );
+                itemAngles.add(guardAngleDegrees(itemPos, playerPos));
+            }
+
+            scheduleGuardOrbitBoost(
+                    ownerUuid,
+                    layer,
+                    itemAngles,
+                    targetAngle,
+                    currentOrbitSpeed(client),
+                    durationTicks
+            );
+            return;
+        }
+
+        AbstractClientPlayerEntity owner = findPlayer(client, ownerUuid);
+        RemoteRoyalArmsVisual visual = remoteVisuals.get(ownerUuid);
+        if (owner == null || visual == null || visual.items.isEmpty()) {
+            return;
+        }
+
+        Vec3d playerPos = owner.getPos();
+        float normalSpeed = remoteOrbitSpeed(owner);
+        float baseTime = client.world.getTime() * normalSpeed
+                + remoteExplosionOrbitOffsets.getOrDefault(ownerUuid, 0.0F);
+        float guardProgress = remoteGuardFormationProgress.getOrDefault(
+                ownerUuid,
+                0.0F
+        );
+        float layerOffset = currentGuardLayerOffset(ownerUuid, layer)
+                * guardProgress;
+        float targetAngle = guardAngleDegrees(interceptPos, playerPos);
+        List<Float> itemAngles = new ArrayList<>();
+        int total = visual.items.size();
+        for (int i = 0; i < total; i++) {
+            int index = i + 1;
+            if (guardLayerForIndex(index) != layer) {
+                continue;
+            }
+
+            Vec3d itemPos = getRemoteItemPosition(
+                    visual.items.get(i),
+                    index,
+                    playerPos,
+                    baseTime + layerOffset,
+                    1.0F,
+                    visual.legacy,
+                    visual.ardynWarpCharges,
+                    total,
+                    guardProgress
+            );
+            itemAngles.add(guardAngleDegrees(itemPos, playerPos));
+        }
+
+        scheduleGuardOrbitBoost(
+                ownerUuid,
+                layer,
+                itemAngles,
+                targetAngle,
+                normalSpeed,
+                durationTicks
+        );
+    }
+
+    private static void scheduleGuardOrbitBoost(
+            UUID ownerUuid,
+            int layer,
+            List<Float> itemAngles,
+            float targetAngle,
+            float normalSpeed,
+            int durationTicks
+    ) {
+        OwnerLayerKey key = new OwnerLayerKey(ownerUuid, layer);
+        if (itemAngles.isEmpty()) {
+            guardLayerBoosts.remove(key);
+            return;
+        }
+
+        float normalTravel = Math.max(0.0F, normalSpeed) * durationTicks;
+        float nearestReachable = Float.MAX_VALUE;
+        float nearestNextRevolution = Float.MAX_VALUE;
+
+        for (float itemAngle : itemAngles) {
+            float forwardTravel = guardForwardDegrees(itemAngle, targetAngle);
+
+            // The ring is never allowed to rotate backwards. If an item has already
+            // passed the useful interception window, the next item ahead is selected.
+            if (forwardTravel + 0.001F >= normalTravel) {
+                nearestReachable = Math.min(nearestReachable, forwardTravel);
+            } else {
+                nearestNextRevolution = Math.min(
+                        nearestNextRevolution,
+                        forwardTravel + 360.0F
+                );
+            }
+        }
+
+        float totalTravel = nearestReachable != Float.MAX_VALUE
+                ? nearestReachable
+                : nearestNextRevolution;
+        if (totalTravel == Float.MAX_VALUE) {
+            guardLayerBoosts.remove(key);
+            return;
+        }
+
+        float extraTravel = Math.max(0.0F, totalTravel - normalTravel);
+        if (extraTravel <= 0.001F) {
+            guardLayerBoosts.remove(key);
+            return;
+        }
+
+        guardLayerBoosts.put(
+                key,
+                new GuardOrbitBoost(extraTravel, durationTicks)
+        );
+    }
+
+    public static void beginExplosionGuard(
+            UUID ownerUuid,
+            int itemCount,
+            float protection
+    ) {
+        int protectedItems = MathHelper.clamp(itemCount, 1, 7);
+        float clampedProtection = MathHelper.clamp(protection, 0.0F, 0.70F);
+        clearGuardLayerBoosts(ownerUuid);
+        explosionGuardOrbits.put(
+                ownerUuid,
+                new ExplosionGuardOrbit(protectedItems, clampedProtection)
+        );
+    }
+
+    public static void updateGuardState(UUID ownerUuid, boolean active) {
+        if (!active) {
+            clearGuardCombatEffects(ownerUuid);
+        }
+    }
+
+    private static void tickGuardFormationProgress(MinecraftClient client) {
+        previousLocalGuardFormationProgress = localGuardFormationProgress;
+        boolean localTarget = client.player != null
+                && ClientLuciiState.legacy() == LuciiLegacy.NOCTIS
+                && ClientLuciiState.royalArmsActive()
+                && RoyalArmsGuardClient.isActive(client.player.getUuid());
+        localGuardFormationProgress = approachGuardProgress(
+                localGuardFormationProgress,
+                localTarget ? 1.0F : 0.0F
+        );
+
+        previousRemoteGuardFormationProgress.clear();
+        previousRemoteGuardFormationProgress.putAll(remoteGuardFormationProgress);
+        for (Map.Entry<UUID, RemoteRoyalArmsVisual> entry : remoteVisuals.entrySet()) {
+            UUID ownerUuid = entry.getKey();
+            RemoteRoyalArmsVisual visual = entry.getValue();
+            boolean target = visual.legacy == LuciiLegacy.NOCTIS
+                    && !visual.closing
+                    && RoyalArmsGuardClient.isActive(ownerUuid);
+            float current = remoteGuardFormationProgress.getOrDefault(
+                    ownerUuid,
+                    0.0F
+            );
+            remoteGuardFormationProgress.put(
+                    ownerUuid,
+                    approachGuardProgress(current, target ? 1.0F : 0.0F)
+            );
+        }
+    }
+
+    private static float approachGuardProgress(float current, float target) {
+        float next = MathHelper.lerp(GUARD_FORMATION_LERP, current, target);
+        if (Math.abs(next - target) < 0.002F) {
+            return target;
+        }
+        return next;
+    }
+
+    private static void advanceGuardLayerBoosts() {
+        previousGuardLayerOffsets.clear();
+        for (Map.Entry<UUID, float[]> entry : guardLayerOffsets.entrySet()) {
+            previousGuardLayerOffsets.put(
+                    entry.getKey(),
+                    entry.getValue().clone()
+            );
+        }
+
+        List<OwnerLayerKey> finished = new ArrayList<>();
+        for (Map.Entry<OwnerLayerKey, GuardOrbitBoost> entry
+                : new ArrayList<>(guardLayerBoosts.entrySet())) {
+            OwnerLayerKey key = entry.getKey();
+            GuardOrbitBoost boost = entry.getValue();
+            float[] offsets = guardLayerOffsets.computeIfAbsent(
+                    key.ownerUuid,
+                    ignored -> new float[GUARD_LAYER_COUNT]
+            );
+            offsets[key.layer] += boost.advance();
+            if (boost.finished()) {
+                finished.add(key);
+            }
+        }
+
+        for (OwnerLayerKey key : finished) {
+            guardLayerBoosts.remove(key);
+        }
+    }
+
+    private static float maxGuardLayerMotion(UUID ownerUuid) {
+        float[] current = guardLayerOffsets.get(ownerUuid);
+        if (current == null) {
+            return 0.0F;
+        }
+
+        float[] previous = previousGuardLayerOffsets.get(ownerUuid);
+        float maximum = 0.0F;
+        for (int layer = 0; layer < GUARD_LAYER_COUNT; layer++) {
+            float oldValue = previous == null ? current[layer] : previous[layer];
+            maximum = Math.max(maximum, Math.abs(current[layer] - oldValue));
+        }
+        return maximum;
+    }
+
+    private static float advanceLocalExplosionGuardOrbit(
+            UUID ownerUuid,
+            float normalSpeed
+    ) {
+        ExplosionGuardOrbit state = explosionGuardOrbits.get(ownerUuid);
+        if (state == null) {
+            return normalSpeed;
+        }
+
+        float delta = state.advance(normalSpeed);
+        if (state.finished()) {
+            explosionGuardOrbits.remove(ownerUuid);
+        }
+        return delta;
+    }
+
+    private static void tickRemoteExplosionEffects(UUID selfUuid) {
+        previousRemoteExplosionOrbitOffsets.clear();
+        previousRemoteExplosionOrbitOffsets.putAll(remoteExplosionOrbitOffsets);
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        List<UUID> finished = new ArrayList<>();
+        for (Map.Entry<UUID, ExplosionGuardOrbit> entry
+                : new ArrayList<>(explosionGuardOrbits.entrySet())) {
+            UUID ownerUuid = entry.getKey();
+            if (ownerUuid.equals(selfUuid)) {
+                continue;
+            }
+
+            AbstractClientPlayerEntity owner = findPlayer(client, ownerUuid);
+            if (owner == null) {
+                finished.add(ownerUuid);
+                continue;
+            }
+
+            float normalSpeed = remoteOrbitSpeed(owner);
+            float desiredDelta = entry.getValue().advance(normalSpeed);
+            remoteExplosionOrbitOffsets.merge(
+                    ownerUuid,
+                    desiredDelta - normalSpeed,
+                    Float::sum
+            );
+            if (entry.getValue().finished()) {
+                finished.add(ownerUuid);
+            }
+        }
+
+        for (UUID ownerUuid : finished) {
+            explosionGuardOrbits.remove(ownerUuid);
+        }
+    }
+
+    private static float interpolatedRemoteExplosionOrbitOffset(
+            UUID ownerUuid,
+            float tickDelta
+    ) {
+        float current = remoteExplosionOrbitOffsets.getOrDefault(
+                ownerUuid,
+                0.0F
+        );
+        float previous = previousRemoteExplosionOrbitOffsets.getOrDefault(
+                ownerUuid,
+                current
+        );
+        return MathHelper.lerp(tickDelta, previous, current);
+    }
+
+    private static float currentGuardLayerOffset(UUID ownerUuid, int layer) {
+        float[] offsets = guardLayerOffsets.get(ownerUuid);
+        return offsets == null ? 0.0F : offsets[layer];
+    }
+
+    private static float interpolatedGuardLayerOffset(
+            UUID ownerUuid,
+            int layer,
+            float tickDelta
+    ) {
+        float[] current = guardLayerOffsets.get(ownerUuid);
+        if (current == null) {
+            return 0.0F;
+        }
+
+        float[] previous = previousGuardLayerOffsets.get(ownerUuid);
+        float oldValue = previous == null ? current[layer] : previous[layer];
+        return MathHelper.lerp(tickDelta, oldValue, current[layer]);
+    }
+
+    private static float interpolatedRemoteGuardFormationProgress(
+            UUID ownerUuid,
+            float tickDelta
+    ) {
+        float current = remoteGuardFormationProgress.getOrDefault(
+                ownerUuid,
+                0.0F
+        );
+        float previous = previousRemoteGuardFormationProgress.getOrDefault(
+                ownerUuid,
+                0.0F
+        );
+        return MathHelper.lerp(tickDelta, previous, current);
+    }
+
+    private static float guardAngleDegrees(Vec3d position, Vec3d playerPos) {
+        return (float) Math.toDegrees(Math.atan2(
+                position.x - playerPos.x,
+                position.z - playerPos.z
+        ));
+    }
+
+    private static float guardForwardDegrees(float from, float to) {
+        float delta = (to - from) % 360.0F;
+        return delta < 0.0F ? delta + 360.0F : delta;
+    }
+
+    private static int guardLayerForIndex(int index) {
+        return switch (Math.floorMod(index - 1, GUARD_LAYER_COUNT)) {
+            case 0 -> GUARD_LAYER_MIDDLE;
+            case 1 -> GUARD_LAYER_UPPER;
+            default -> GUARD_LAYER_LOWER;
+        };
+    }
+
+    private static int guardLayerItemCount(int total, int layer) {
+        int count = 0;
+        for (int index = 1; index <= total; index++) {
+            if (guardLayerForIndex(index) == layer) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static int guardLayerRank(int index) {
+        return Math.floorDiv(index - 1, GUARD_LAYER_COUNT);
+    }
+
+    private static float guardLayerPhase(int layer) {
+        return switch (layer) {
+            case GUARD_LAYER_UPPER -> 0.0F;
+            case GUARD_LAYER_MIDDLE -> 48.0F;
+            default -> 96.0F;
+        };
+    }
+
+    private static float getGuardRingAngleDegrees(int index, int total) {
+        int layer = guardLayerForIndex(index);
+        int layerCount = Math.max(1, guardLayerItemCount(total, layer));
+        int rank = guardLayerRank(index);
+        return guardLayerPhase(layer) + rank * 360.0F / layerCount;
+    }
+
+    private static double guardLayerYOffset(int layer) {
+        return switch (layer) {
+            case GUARD_LAYER_UPPER -> GUARD_UPPER_Y_OFFSET;
+            case GUARD_LAYER_LOWER -> GUARD_LOWER_Y_OFFSET;
+            default -> GUARD_MIDDLE_Y_OFFSET;
+        };
+    }
+
+    private static float lerpAngleDegrees(
+            float from,
+            float to,
+            float progress
+    ) {
+        return from + MathHelper.wrapDegrees(to - from)
+                * MathHelper.clamp(progress, 0.0F, 1.0F);
+    }
+
+    private static void clearGuardLayerBoosts(UUID ownerUuid) {
+        guardLayerBoosts.keySet().removeIf(
+                key -> key.ownerUuid.equals(ownerUuid)
+        );
+    }
+
+    private static void clearGuardCombatEffects(UUID ownerUuid) {
+        clearGuardLayerBoosts(ownerUuid);
+        explosionGuardOrbits.remove(ownerUuid);
+    }
+
+    private static void clearGuardEffects(UUID ownerUuid) {
+        clearGuardCombatEffects(ownerUuid);
+        guardLayerOffsets.remove(ownerUuid);
+        previousGuardLayerOffsets.remove(ownerUuid);
+        remoteExplosionOrbitOffsets.remove(ownerUuid);
+        previousRemoteExplosionOrbitOffsets.remove(ownerUuid);
+        remoteGuardFormationProgress.remove(ownerUuid);
+        previousRemoteGuardFormationProgress.remove(ownerUuid);
+    }
+
+    public static void clearLocalGuardEffects() {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.player != null) {
+            clearGuardCombatEffects(client.player.getUuid());
+        }
+    }
+
+    public static void clearGuardBlocks() {
+        guardLayerBoosts.clear();
+        guardLayerOffsets.clear();
+        previousGuardLayerOffsets.clear();
+        explosionGuardOrbits.clear();
+        remoteExplosionOrbitOffsets.clear();
+        previousRemoteExplosionOrbitOffsets.clear();
+        remoteGuardFormationProgress.clear();
+        previousRemoteGuardFormationProgress.clear();
+        localGuardFormationProgress = 0.0F;
+        previousLocalGuardFormationProgress = 0.0F;
+    }
+
+    private record OwnerLayerKey(UUID ownerUuid, int layer) {
+    }
+    // END PHANTOM_GUARD_THREE_LAYER_V7 METHODS
+
     public static void updateRemoteVisual(UUID ownerUuid, boolean active, LuciiLegacy legacy, List<ItemStack> stacks, int ardynWarpCharges) {
         if (!active || legacy == LuciiLegacy.NONE) {
+            clearGuardCombatEffects(ownerUuid);
             RemoteRoyalArmsVisual existing = remoteVisuals.get(ownerUuid);
             if (existing == null) {
                 return;
@@ -753,52 +1421,11 @@ public final class RoyalArmsAbility {
 
     public static void clearRemoteVisuals() {
         remoteVisuals.clear();
+        clearGuardBlocks();
         ardynBarrageOwners.clear();
-        guardBlockVisuals.clear();
         clearAura();
         lastActive = false;
         toggleLockTicks = 0;
-    }
-
-    public static void beginGuardBlock(UUID ownerUuid, Vec3d interceptPos, Vec3d incomingVelocity) {
-        ItemStack stack = findGuardStack(ownerUuid);
-        if (stack.isEmpty()) {
-            return;
-        }
-
-        Vec3d direction = incomingVelocity.lengthSquared() > 0.0D
-                ? incomingVelocity.normalize()
-                : new Vec3d(0.0D, 0.0D, 1.0D);
-        float lookAngle = (float) Math.toDegrees(Math.atan2(-direction.x, -direction.z));
-        float spinAngle = spinPhaseFor(stack);
-        int seed = ownerUuid.hashCode() ^ guardBlockVisuals.size() * 31 ^ Registries.ITEM.getId(stack.getItem()).hashCode();
-        guardBlockVisuals.add(new GuardBlockVisual(stack, interceptPos, lookAngle, spinAngle, seed));
-    }
-
-    public static void clearGuardBlocks() {
-        guardBlockVisuals.clear();
-    }
-
-    private static ItemStack findGuardStack(UUID ownerUuid) {
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client.player != null && client.player.getUuid().equals(ownerUuid)) {
-            for (FloatingItem item : floatingItems) {
-                if (!item.stack.isEmpty()) {
-                    return item.stack.copyWithCount(1);
-                }
-            }
-        }
-
-        RemoteRoyalArmsVisual visual = remoteVisuals.get(ownerUuid);
-        if (visual != null) {
-            for (RemoteFloatingItem item : visual.items) {
-                if (!item.stack.isEmpty()) {
-                    return item.stack.copyWithCount(1);
-                }
-            }
-        }
-
-        return ItemStack.EMPTY;
     }
 
     public static void updateArdynBarrage(UUID ownerUuid, boolean active) {
@@ -808,7 +1435,6 @@ public final class RoyalArmsAbility {
             }
         } else {
             ardynBarrageOwners.remove(ownerUuid);
-            restartAuraAppearance(ownerUuid);
         }
     }
 
@@ -901,6 +1527,71 @@ public final class RoyalArmsAbility {
         float shifted = -2.0F * clamped + 2.0F;
         return 1.0F - shifted * shifted * shifted / 2.0F;
     }
+
+    // BEGIN PHANTOM_GUARD_THREE_LAYER_V7 CLASSES
+    private static final class GuardOrbitBoost {
+        private final float totalExtraAngle;
+        private final int durationTicks;
+        private int age;
+        private float appliedAngle;
+
+        private GuardOrbitBoost(float totalExtraAngle, int durationTicks) {
+            this.totalExtraAngle = totalExtraAngle;
+            this.durationTicks = Math.max(1, durationTicks);
+        }
+
+        private float advance() {
+            int nextAge = Math.min(durationTicks, age + 1);
+            float progress = easeOutCubic(nextAge / (float) durationTicks);
+            float targetAppliedAngle = totalExtraAngle * progress;
+            float delta = targetAppliedAngle - appliedAngle;
+            appliedAngle = targetAppliedAngle;
+            age = nextAge;
+            return delta;
+        }
+
+        private boolean finished() {
+            return age >= durationTicks;
+        }
+    }
+
+    private static final class ExplosionGuardOrbit {
+        private final float startingExtraSpeed;
+        private final float protection;
+        private int age;
+
+        private ExplosionGuardOrbit(int itemCount, float protection) {
+            this.startingExtraSpeed = Math.min(
+                    EXPLOSION_GUARD_MAX_EXTRA_SPEED,
+                    EXPLOSION_GUARD_BASE_EXTRA_SPEED
+                            + itemCount * EXPLOSION_GUARD_EXTRA_SPEED_PER_ITEM
+            );
+            this.protection = protection;
+        }
+
+        private float advance(float normalSpeed) {
+            age++;
+            if (age <= EXPLOSION_GUARD_HOLD_TICKS) {
+                // All weapons remain fixed for a short impact pose, as in the reference.
+                return 0.0F;
+            }
+
+            int spinAge = age - EXPLOSION_GUARD_HOLD_TICKS;
+            float progress = MathHelper.clamp(
+                    spinAge / (float) EXPLOSION_GUARD_SPIN_TICKS,
+                    0.0F,
+                    1.0F
+            );
+            float decay = 1.0F - easeOutCubic(progress);
+            float protectionScale = MathHelper.lerp(protection / 0.70F, 0.82F, 1.0F);
+            return normalSpeed + startingExtraSpeed * decay * protectionScale;
+        }
+
+        private boolean finished() {
+            return age >= EXPLOSION_GUARD_HOLD_TICKS + EXPLOSION_GUARD_SPIN_TICKS;
+        }
+    }
+    // END PHANTOM_GUARD_THREE_LAYER_V7 CLASSES
 
     private static final class RemoteRoyalArmsVisual {
         private final LuciiLegacy legacy;
@@ -1049,27 +1740,6 @@ public final class RoyalArmsAbility {
 
         private boolean finishedClosing() {
             return closeTicks >= DISAPPEAR_TICKS;
-        }
-    }
-
-    private static final class GuardBlockVisual {
-        private final ItemStack stack;
-        private final Vec3d pos;
-        private final float lookAngle;
-        private final float spinAngle;
-        private final int seed;
-        private int age;
-
-        private GuardBlockVisual(ItemStack stack, Vec3d pos, float lookAngle, float spinAngle, int seed) {
-            this.stack = stack;
-            this.pos = pos;
-            this.lookAngle = lookAngle;
-            this.spinAngle = spinAngle;
-            this.seed = seed;
-        }
-
-        private boolean finished() {
-            return age >= GUARD_BLOCK_TICKS;
         }
     }
 

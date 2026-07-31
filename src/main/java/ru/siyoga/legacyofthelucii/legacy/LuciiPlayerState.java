@@ -144,6 +144,17 @@ public final class LuciiPlayerState {
         return !ardynOverkillActive && (amount <= 0 || mana >= amount);
     }
 
+    public boolean restoreMana() {
+        if (mana >= maxMana && manaRegenDelay == 0 && regenTimer == 0) {
+            return false;
+        }
+
+        mana = maxMana;
+        manaRegenDelay = 0;
+        regenTimer = 0;
+        return true;
+    }
+
     public void addExperience(int amount) {
         if (amount <= 0) {
             return;

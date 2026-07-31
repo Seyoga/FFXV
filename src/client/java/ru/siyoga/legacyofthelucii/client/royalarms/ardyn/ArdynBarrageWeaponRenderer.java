@@ -9,10 +9,10 @@ import net.minecraft.client.render.entity.EntityRenderer;
 import net.minecraft.client.render.entity.EntityRendererFactory;
 import net.minecraft.client.render.item.ItemRenderer;
 import net.minecraft.client.render.model.json.ModelTransformationMode;
-import net.minecraft.client.texture.SpriteAtlasTexture;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.screen.PlayerScreenHandler;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
@@ -76,7 +76,7 @@ public final class ArdynBarrageWeaponRenderer extends EntityRenderer<ArdynBarrag
 
     @Override
     public Identifier getTexture(ArdynBarrageWeaponEntity entity) {
-        return SpriteAtlasTexture.BLOCK_ATLAS_TEXTURE;
+        return PlayerScreenHandler.BLOCK_ATLAS_TEXTURE;
     }
 
     private static Quaternionf tipRotation(ItemStack stack, Vec3d direction) {
@@ -115,6 +115,7 @@ public final class ArdynBarrageWeaponRenderer extends EntityRenderer<ArdynBarrag
         }
     }
 
+    @SuppressWarnings("deprecation")
     private static final class TintedItemVertexConsumer implements VertexConsumer {
         private final VertexConsumer delegate;
         private final RenderTint tint;
