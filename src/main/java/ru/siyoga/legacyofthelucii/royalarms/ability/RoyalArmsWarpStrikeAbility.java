@@ -62,14 +62,30 @@ public final class RoyalArmsWarpStrikeAbility {
     private static final int ARDYN_BARRAGE_CHARGES_REQUIRED = 12;
     private static final int ARDYN_BARRAGE_FIRE_TICKS = 80;
     private static final int ARDYN_BARRAGE_RETURN_TICKS = 100;
-    private static final int ARDYN_BARRAGE_SHOT_INTERVAL = 2;
-    private static final int ARDYN_BARRAGE_MAX_FLIGHT_TICKS = 9;
+    private static final int ARDYN_BARRAGE_SHOT_INTERVAL = 1;
     private static final int ARDYN_BARRAGE_RECALL_MAX_DELAY = 72;
     private static final double ARDYN_BARRAGE_DISTANCE = 16.0D;
-    private static final double ARDYN_BARRAGE_PROJECTILE_SPEED = 1.85D;
+    private static final double ARDYN_BARRAGE_PROJECTILE_SPEED = 2.35D;
     private static final double ARDYN_BARRAGE_HORIZONTAL_SPREAD = 0.38D;
     private static final double ARDYN_BARRAGE_VERTICAL_SPREAD = 0.24D;
-    private static final double ARDYN_BARRAGE_START_SIDE_RADIUS = 1.55D;
+    private static final double[] ARDYN_BARRAGE_SOURCE_SIDE = {
+            -2.15D, 2.15D,
+            -1.72D, 1.72D,
+            -1.20D, 1.20D,
+            -0.58D, 0.58D
+    };
+    private static final double[] ARDYN_BARRAGE_SOURCE_HEIGHT = {
+            0.55D, 0.55D,
+            1.12D, 1.12D,
+            1.72D, 1.72D,
+            2.30D, 2.30D
+    };
+    private static final double[] ARDYN_BARRAGE_SOURCE_BACK = {
+            0.35D, 0.35D,
+            0.52D, 0.52D,
+            0.68D, 0.68D,
+            0.82D, 0.82D
+    };
     private static final float ARDYN_BARRAGE_NORMAL_DAMAGE = 0.5F;
     private static final float ARDYN_BARRAGE_WEAPON_MULTIPLIER = 0.15F;
     private static final double ARDYN_ARC_HEIGHT = 0.3D;
@@ -261,7 +277,7 @@ public final class RoyalArmsWarpStrikeAbility {
             barrage.weapons.removeIf(Entity::isRemoved);
             if (barrage.age <= ARDYN_BARRAGE_FIRE_TICKS) {
                 spawnArdynBarrageRingParticles(world, player);
-                if (barrage.age % ARDYN_BARRAGE_SHOT_INTERVAL == 1) {
+                if ((barrage.age - 1) % ARDYN_BARRAGE_SHOT_INTERVAL == 0) {
                     launchArdynBarrageShot(world, player, barrage);
                 }
                 continue;
@@ -304,18 +320,23 @@ public final class RoyalArmsWarpStrikeAbility {
             right = right.normalize();
         }
         Vec3d up = right.crossProduct(look).normalize();
+        Vec3d sourceForward = new Vec3d(right.z, 0.0D, -right.x).normalize();
 
         int pattern = barrage.shotIndex++;
-        double startBand = ((pattern % 5) - 2) / 2.0D;
-        double startSide = startBand * ARDYN_BARRAGE_START_SIDE_RADIUS
-                + (world.random.nextDouble() - 0.5D) * 0.45D;
-        double startHeight = 0.70D
-                + ((pattern / 5) % 4) * 0.38D
-                + world.random.nextDouble() * 0.22D;
+        int sourceIndex = Math.floorMod(pattern, ARDYN_BARRAGE_SOURCE_SIDE.length);
+
+        // Eight stable launch sockets form a tall arc around the player.
+        // Cycling them once per tick creates eight distinct streams instead of two broad sides.
+        double startSide = ARDYN_BARRAGE_SOURCE_SIDE[sourceIndex]
+                + centeredSpread(world, 0.10D);
+        double startHeight = ARDYN_BARRAGE_SOURCE_HEIGHT[sourceIndex]
+                + centeredSpread(world, 0.08D);
+        double startBack = ARDYN_BARRAGE_SOURCE_BACK[sourceIndex]
+                + centeredSpread(world, 0.06D);
         Vec3d start = player.getPos()
                 .add(0.0D, startHeight, 0.0D)
                 .add(right.multiply(startSide))
-                .subtract(look.multiply(0.65D));
+                .subtract(sourceForward.multiply(startBack));
 
         // Three samples averaged together give a center-heavy cone instead of a flat random square:
         // most blades travel near the crosshair, but the outer shots intentionally miss.
@@ -332,8 +353,7 @@ public final class RoyalArmsWarpStrikeAbility {
                 player,
                 stack,
                 direction.multiply(ARDYN_BARRAGE_PROJECTILE_SPEED),
-                barrageDamageFor(stack),
-                ARDYN_BARRAGE_MAX_FLIGHT_TICKS
+                barrageDamageFor(stack)
         );
         if (world.spawnEntity(weapon)) {
             barrage.weapons.add(weapon);
