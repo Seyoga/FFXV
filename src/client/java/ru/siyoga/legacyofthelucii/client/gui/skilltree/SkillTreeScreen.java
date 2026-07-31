@@ -146,10 +146,20 @@ public final class SkillTreeScreen extends Screen {
 
     private void renderSkills(DrawContext context, int x, int y, int mouseX, int mouseY) {
         if (ClientLuciiState.legacy() == LuciiLegacy.ARDYN) {
-            renderSkillNode(context, x + PAGE_WIDTH / 2 - 55 + (int) Math.round(scrollX), y + PAGE_HEIGHT / 2 - SKILL_FRAME_SIZE / 2 + (int) Math.round(scrollY), Items.ENDER_EYE.getDefaultStack(), Text.translatable("skill.legacyofthelucii.ardyn.shadow_step"), mouseX, mouseY);
-            renderSkillNode(context, x + PAGE_WIDTH / 2 - 13 + (int) Math.round(scrollX), y + PAGE_HEIGHT / 2 - SKILL_FRAME_SIZE / 2 + (int) Math.round(scrollY), Items.ENDER_PEARL.getDefaultStack(), Text.translatable("skill.legacyofthelucii.ardyn.warp"), mouseX, mouseY);
-            renderSkillNode(context, x + PAGE_WIDTH / 2 + 29 + (int) Math.round(scrollX), y + PAGE_HEIGHT / 2 - SKILL_FRAME_SIZE / 2 + (int) Math.round(scrollY), Items.CROSSBOW.getDefaultStack(), Text.translatable("skill.legacyofthelucii.royal_arms.bind"), mouseX, mouseY);
-            renderSkillNode(context, x + PAGE_WIDTH / 2 + 71 + (int) Math.round(scrollX), y + PAGE_HEIGHT / 2 - SKILL_FRAME_SIZE / 2 + (int) Math.round(scrollY), Items.SPECTRAL_ARROW.getDefaultStack(), Text.translatable("skill.legacyofthelucii.ardyn.barrage"), mouseX, mouseY);
+            int rowY = y + PAGE_HEIGHT / 2 - SKILL_FRAME_SIZE / 2 + (int) Math.round(scrollY);
+            renderSkillNode(context, x + PAGE_WIDTH / 2 - 55 + (int) Math.round(scrollX), rowY, Items.ENDER_EYE.getDefaultStack(), Text.translatable("skill.legacyofthelucii.ardyn.shadow_step"), mouseX, mouseY);
+            renderSkillNode(context, x + PAGE_WIDTH / 2 - 13 + (int) Math.round(scrollX), rowY, Items.ENDER_PEARL.getDefaultStack(), Text.translatable("skill.legacyofthelucii.ardyn.warp"), mouseX, mouseY);
+            renderSkillNode(context, x + PAGE_WIDTH / 2 + 29 + (int) Math.round(scrollX), rowY, Items.CROSSBOW.getDefaultStack(), Text.translatable("skill.legacyofthelucii.royal_arms.bind"), mouseX, mouseY);
+            renderSkillNode(context, x + PAGE_WIDTH / 2 + 71 + (int) Math.round(scrollX), rowY, Items.SPECTRAL_ARROW.getDefaultStack(), Text.translatable("skill.legacyofthelucii.ardyn.barrage"), mouseX, mouseY);
+            renderSkillNode(
+                    context,
+                    x + PAGE_WIDTH / 2 + 71 + (int) Math.round(scrollX),
+                    rowY + 34,
+                    Items.WITHER_SKELETON_SKULL.getDefaultStack(),
+                    Text.translatable("skill.legacyofthelucii.ardyn.overkill"),
+                    mouseX,
+                    mouseY
+            );
             return;
         }
 
