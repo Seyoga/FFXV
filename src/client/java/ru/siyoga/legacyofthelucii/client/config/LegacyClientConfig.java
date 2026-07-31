@@ -17,7 +17,7 @@ public final class LegacyClientConfig {
 
     private static LegacyClientConfig INSTANCE = new LegacyClientConfig();
 
-    public String manaHudMode = "compact";
+    public String manaHudMode = "experience_bar";
     public boolean showManaText = false;
     public boolean showOnlyWhenRoyalArmsActive = true;
 
@@ -48,10 +48,16 @@ public final class LegacyClientConfig {
         return !"off".equals(manaHudMode.toLowerCase(Locale.ROOT));
     }
 
+    public boolean useExperienceBarManaHud() {
+        return "experience_bar".equals(manaHudMode.toLowerCase(Locale.ROOT));
+    }
+
     private void normalize() {
-        String normalizedMode = manaHudMode == null ? "compact" : manaHudMode.toLowerCase(Locale.ROOT);
-        if (!"compact".equals(normalizedMode) && !"off".equals(normalizedMode)) {
-            normalizedMode = "compact";
+        String normalizedMode = manaHudMode == null ? "experience_bar" : manaHudMode.toLowerCase(Locale.ROOT);
+        if (!"compact".equals(normalizedMode)
+                && !"experience_bar".equals(normalizedMode)
+                && !"off".equals(normalizedMode)) {
+            normalizedMode = "experience_bar";
         }
 
         manaHudMode = normalizedMode;

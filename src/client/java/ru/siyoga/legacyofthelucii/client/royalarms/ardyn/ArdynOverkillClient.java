@@ -6,7 +6,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.util.math.MathHelper;
-import ru.siyoga.legacyofthelucii.client.state.ArdynOverkillClientState;
+import ru.siyoga.legacyofthelucii.client.state.ClientLuciiState;
 
 public final class ArdynOverkillClient {
     private static final int FILTER_COLOR = 0x623B3547;
@@ -30,7 +30,7 @@ public final class ArdynOverkillClient {
             lastLocalPlayer = player;
         }
 
-        boolean active = player != null && ArdynOverkillClientState.active(player.getUuid());
+        boolean active = player != null && ClientLuciiState.ardynOverkillActive();
         float target = active ? 1.0F : 0.0F;
         intensity = MathHelper.lerp(target > intensity ? 0.10F : 0.065F, intensity, target);
         if (Math.abs(target - intensity) < 0.002F) {
@@ -42,8 +42,8 @@ public final class ArdynOverkillClient {
         // A respawn or reconnect replaces the local ClientPlayerEntity. The screen
         // overlay is rebuilt from the synchronized Overkill state on the next tick.
         // Withered hearts no longer rely on a temporary client-side status effect;
-        // LivingEntityClientMixin asks ArdynOverkillClientState directly.
-        intensity = player != null && ArdynOverkillClientState.active(player.getUuid())
+        // LivingEntityClientMixin asks the authoritative ClientLuciiState directly.
+        intensity = player != null && ClientLuciiState.ardynOverkillActive()
                 ? 1.0F
                 : 0.0F;
     }

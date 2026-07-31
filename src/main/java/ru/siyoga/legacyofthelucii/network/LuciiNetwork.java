@@ -49,6 +49,11 @@ public final class LuciiNetwork {
         buf.writeVarInt(state.maxMana());
         buf.writeBoolean(state.royalArmsActive());
         buf.writeVarInt(state.ardynWarpCharges());
+        // Local Overkill state travels in the regular authoritative state packet.
+        // This packet is sent on join, respawn and every second, so reconnects
+        // cannot permanently lose the HUD flag if a one-shot visual packet races
+        // with client world/player creation.
+        buf.writeBoolean(state.ardynOverkillActive());
         ServerPlayNetworking.send(player, STATE_SYNC_PACKET, buf);
     }
 

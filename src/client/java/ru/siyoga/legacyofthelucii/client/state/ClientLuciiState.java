@@ -8,6 +8,7 @@ public final class ClientLuciiState {
     private static int maxMana = 100;
     private static boolean royalArmsActive;
     private static int ardynWarpCharges;
+    private static boolean ardynOverkillActive;
 
     private ClientLuciiState() {
     }
@@ -36,12 +37,24 @@ public final class ClientLuciiState {
         return ardynWarpCharges;
     }
 
-    public static void update(LuciiLegacy legacy, int mana, int maxMana, boolean royalArmsActive, int ardynWarpCharges) {
+    public static boolean ardynOverkillActive() {
+        return ardynOverkillActive;
+    }
+
+    public static void update(
+            LuciiLegacy legacy,
+            int mana,
+            int maxMana,
+            boolean royalArmsActive,
+            int ardynWarpCharges,
+            boolean ardynOverkillActive
+    ) {
         ClientLuciiState.legacy = legacy;
         ClientLuciiState.mana = Math.max(0, mana);
         ClientLuciiState.maxMana = Math.max(1, maxMana);
         ClientLuciiState.royalArmsActive = royalArmsActive && legacy != LuciiLegacy.NONE;
         ClientLuciiState.ardynWarpCharges = Math.max(0, Math.min(12, ardynWarpCharges));
+        ClientLuciiState.ardynOverkillActive = ardynOverkillActive && legacy == LuciiLegacy.ARDYN;
     }
 
     public static void reset() {
@@ -50,5 +63,6 @@ public final class ClientLuciiState {
         maxMana = 100;
         royalArmsActive = false;
         ardynWarpCharges = 0;
+        ardynOverkillActive = false;
     }
 }

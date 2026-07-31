@@ -44,7 +44,27 @@ public final class LegacyOfTheLuciiClient implements ClientModInitializer {
             int maxMana = buf.readVarInt();
             boolean royalArmsActive = buf.readBoolean();
             int ardynWarpCharges = buf.readVarInt();
-            client.execute(() -> ClientLuciiState.update(legacy, mana, maxMana, royalArmsActive, ardynWarpCharges));
+            boolean ardynOverkillActive = buf.readBoolean();
+            client.execute(() -> {
+                ClientLuciiState.update(
+                        legacy,
+                        mana,
+                        maxMana,
+                        royalArmsActive,
+                        ardynWarpCharges,
+                        ardynOverkillActive
+                );
+
+                // Keep the UUID-based map in sync for remote-player rendering, but
+                // local HUD code no longer depends on this transient visual packet.
+                if (client.player != null) {
+                    ArdynOverkillClientState.update(client.player.getUuid(), ardynOverkillActive);
+                }
+
+                if (!ardynOverkillActive) {
+                    ArdynOverkillClient.clearImmediately(client);
+                }
+            });
         });
         ClientPlayNetworking.registerGlobalReceiver(ArdynOverkillNetwork.STATE_PACKET, (client, handler, buf, responseSender) -> {
             UUID ownerUuid = buf.readUuid();
