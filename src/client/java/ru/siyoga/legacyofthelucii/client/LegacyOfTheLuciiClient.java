@@ -17,14 +17,17 @@ import ru.siyoga.legacyofthelucii.client.hud.LuciiHudOverlay;
 import ru.siyoga.legacyofthelucii.client.royalarms.RoyalArmsAbility;
 import ru.siyoga.legacyofthelucii.client.royalarms.RoyalArmsWallClient;
 import ru.siyoga.legacyofthelucii.client.royalarms.ardyn.ArdynBarrageWeaponRenderer;
+import ru.siyoga.legacyofthelucii.client.royalarms.ardyn.ArdynOverkillClient;
 import ru.siyoga.legacyofthelucii.client.royalarms.ardyn.ArdynShadowStepClient;
 import ru.siyoga.legacyofthelucii.client.royalarms.bind.RoyalArmsBindClient;
 import ru.siyoga.legacyofthelucii.client.royalarms.wall.RoyalArmsWallAnimations;
 import ru.siyoga.legacyofthelucii.client.royalarms.wall.RoyalArmsWallBlockEntityRenderer;
 import ru.siyoga.legacyofthelucii.client.royalarms.warp.RoyalArmsWarpTrailClient;
+import ru.siyoga.legacyofthelucii.client.state.ArdynOverkillClientState;
 import ru.siyoga.legacyofthelucii.client.state.ClientLuciiState;
 import ru.siyoga.legacyofthelucii.entity.LegacyEntities;
 import ru.siyoga.legacyofthelucii.legacy.LuciiLegacy;
+import ru.siyoga.legacyofthelucii.network.ArdynOverkillNetwork;
 import ru.siyoga.legacyofthelucii.network.LuciiNetwork;
 
 import java.util.ArrayList;
@@ -42,6 +45,18 @@ public final class LegacyOfTheLuciiClient implements ClientModInitializer {
             boolean royalArmsActive = buf.readBoolean();
             int ardynWarpCharges = buf.readVarInt();
             client.execute(() -> ClientLuciiState.update(legacy, mana, maxMana, royalArmsActive, ardynWarpCharges));
+        });
+        ClientPlayNetworking.registerGlobalReceiver(ArdynOverkillNetwork.STATE_PACKET, (client, handler, buf, responseSender) -> {
+            UUID ownerUuid = buf.readUuid();
+            boolean active = buf.readBoolean();
+            client.execute(() -> {
+                ArdynOverkillClientState.update(ownerUuid, active);
+                if (!active && client.player != null && ownerUuid.equals(client.player.getUuid())) {
+                    // A respawn creates a clean player life. Remove the fake Wither HUD
+                    // and screen overlay immediately instead of waiting for their fade/expiry.
+                    ArdynOverkillClient.clearImmediately(client);
+                }
+            });
         });
         ClientPlayNetworking.registerGlobalReceiver(LuciiNetwork.ROYAL_ARMS_VISUAL_PACKET, (client, handler, buf, responseSender) -> {
             UUID ownerUuid = buf.readUuid();
@@ -113,7 +128,12 @@ public final class LegacyOfTheLuciiClient implements ClientModInitializer {
             client.execute(() -> RoyalArmsBindClient.update(ownerUuid, targetEntityId, targetCenter, active, impaled, legacy, stacks));
         });
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+            // Clear client-only Wither hearts and the color filter before the old
+            // ClientPlayerEntity is discarded. Otherwise static renderer state can
+            // leak into the next world/session.
+            ArdynOverkillClient.reset(client);
             ClientLuciiState.reset();
+            ArdynOverkillClientState.reset();
             RoyalArmsAbility.clearRemoteVisuals();
             RoyalArmsWallAnimations.clear();
             RoyalArmsWarpTrailClient.clear();
@@ -121,6 +141,7 @@ public final class LegacyOfTheLuciiClient implements ClientModInitializer {
             RoyalArmsBindClient.clear();
         });
         LuciiHudOverlay.register();
+        ArdynOverkillClient.register();
         RoyalArmsAbility.register();
         RoyalArmsWallClient.register();
         RoyalArmsWallAnimations.register();

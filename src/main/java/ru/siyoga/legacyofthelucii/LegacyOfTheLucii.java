@@ -22,7 +22,9 @@ import ru.siyoga.legacyofthelucii.item.LegacyItems;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerState;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerStates;
 import ru.siyoga.legacyofthelucii.legacy.RoyalArmsInventoryFilter;
+import ru.siyoga.legacyofthelucii.network.ArdynOverkillNetwork;
 import ru.siyoga.legacyofthelucii.network.LuciiNetwork;
+import ru.siyoga.legacyofthelucii.royalarms.ability.ArdynOverkillAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.ArdynShadowStepAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsBindAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsOrbitDamageAbility;
@@ -46,8 +48,17 @@ public final class LegacyOfTheLucii implements ModInitializer {
         ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.ROYAL_ARMS_WARP_PACKET, LegacyOfTheLucii::handleRoyalArmsWarp);
         ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.ROYAL_ARMS_BIND_PACKET, LegacyOfTheLucii::handleRoyalArmsBind);
         ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.ARDYN_SHADOW_STEP_PACKET, LegacyOfTheLucii::handleArdynShadowStep);
-        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> LuciiNetwork.sendState(handler.player));
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            LuciiNetwork.sendState(handler.player);
+            // Restore all active forms for the joining client, including its own persisted state.
+            ArdynOverkillNetwork.sendAllStates(handler.player);
+            // Existing clients also need the rejoining player's restored state.
+            ArdynOverkillNetwork.broadcastState(handler.player);
+        });
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+            // This only clears remote client visuals for the absent entity. The server-side
+            // Overkill flag and mana remain in player NBT and resume on the next login.
+            ArdynOverkillNetwork.broadcastState(handler.player, false);
             RoyalArmsWallAbility.clearAll(handler.player);
             RoyalArmsWarpStrikeAbility.clearAll(handler.player);
             RoyalArmsBindAbility.clearAll(handler.player);
@@ -65,10 +76,15 @@ public final class LegacyOfTheLucii implements ModInitializer {
             RoyalArmsWarpStrikeAbility.tick(server);
             RoyalArmsBindAbility.tick(server);
             ArdynShadowStepAbility.tick(server);
+
             for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
-                LuciiPlayerState state = LuciiPlayerStates.get(player);
-                state.tick();
-                if (server.getTicks() % 20 == 0) {
+                LuciiPlayerStates.get(player).tick();
+            }
+            ArdynOverkillAbility.tick(server);
+
+            if (server.getTicks() % 20 == 0) {
+                for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+                    LuciiPlayerState state = LuciiPlayerStates.get(player);
                     LuciiNetwork.sendState(player);
                     if (state.royalArmsActive()) {
                         LuciiNetwork.broadcastRoyalArmsVisual(player);
@@ -89,11 +105,46 @@ public final class LegacyOfTheLucii implements ModInitializer {
             RoyalArmsWarpStrikeAbility.clearAll(oldPlayer);
             RoyalArmsBindAbility.clearAll(oldPlayer);
             ArdynShadowStepAbility.clearAll(oldPlayer);
+
             NbtCompound nbt = new NbtCompound();
-            LuciiPlayerStates.get(oldPlayer).writeNbt(nbt);
-            LuciiPlayerStates.get(newPlayer).readNbt(nbt);
+            LuciiPlayerState oldState = LuciiPlayerStates.get(oldPlayer);
+            oldState.writeNbt(nbt);
+            LuciiPlayerState newState = LuciiPlayerStates.get(newPlayer);
+            newState.readNbt(nbt);
+
+            if (!alive) {
+                // A real death ends Overkill on BOTH entity instances. Clearing the old
+                // state prevents any late sync from resurrecting the visual flag while the
+                // client is replacing its player entity.
+                oldState.endArdynOverkill();
+                newState.endArdynOverkill();
+                ArdynOverkillNetwork.broadcastState(oldPlayer, false);
+            }
+        });
+        ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
+            LuciiPlayerState newState = LuciiPlayerStates.get(newPlayer);
+            if (!alive) {
+                newState.endArdynOverkill();
+            }
+
+            // AFTER_RESPAWN runs after the replacement ServerPlayerEntity exists. Send the
+            // authoritative state here rather than only from COPY_FROM, which is documented
+            // to run before the respawn is completely finished.
             LuciiNetwork.sendState(newPlayer);
+            ArdynOverkillNetwork.broadcastState(newPlayer, alive && newState.ardynOverkillActive());
             LuciiNetwork.broadcastRoyalArmsVisual(newPlayer);
+
+            // Queue one duplicate sync for the next server task. This reaches the client
+            // after its local player reference has changed and clears any fake Wither HUD
+            // instance or screen overlay that belonged to the dead entity.
+            if (!alive && newPlayer.getServer() != null) {
+                newPlayer.getServer().execute(() -> {
+                    if (!newPlayer.isRemoved()) {
+                        LuciiNetwork.sendState(newPlayer);
+                        ArdynOverkillNetwork.broadcastState(newPlayer, false);
+                    }
+                });
+            }
         });
         LOGGER.info("Legacy of the Lucii initialized.");
     }

@@ -6,6 +6,7 @@ public final class LuciiPlayerState {
     private static final int DEFAULT_MAX_MANA = 100;
     private static final int DEFAULT_MANA_REGEN_INTERVAL = 20;
     private static final int DEFAULT_MANA_REGEN_DELAY = 20 * 5;
+    private static final int ARDYN_OVERKILL_MANA_REGEN_INTERVAL = 4;
     private static final String MANA_KEY = "Mana";
     private static final String MAX_MANA_KEY = "MaxMana";
     private static final String LEVEL_KEY = "Level";
@@ -14,6 +15,9 @@ public final class LuciiPlayerState {
     private static final String ROYAL_ARMS_ACTIVE_KEY = "RoyalArmsActive";
     private static final String ROYAL_ARMS_FILTER_KEY = "RoyalArmsFilter";
     private static final String ARDYN_WARP_CHARGES_KEY = "ArdynWarpCharges";
+    private static final String ARDYN_OVERKILL_ACTIVE_KEY = "ArdynOverkillActive";
+    private static final String REGEN_TIMER_KEY = "ManaRegenTimer";
+    private static final String MANA_REGEN_DELAY_KEY = "ManaRegenDelay";
     private static final int MAX_ARDYN_WARP_CHARGES = 12;
 
     private int mana = DEFAULT_MAX_MANA;
@@ -24,6 +28,7 @@ public final class LuciiPlayerState {
     private boolean royalArmsActive;
     private RoyalArmsInventoryFilter royalArmsFilter = RoyalArmsInventoryFilter.ALL;
     private int ardynWarpCharges;
+    private boolean ardynOverkillActive;
     private int regenTimer;
     private int manaRegenDelay;
 
@@ -93,6 +98,28 @@ public final class LuciiPlayerState {
         return true;
     }
 
+    public boolean ardynOverkillActive() {
+        return ardynOverkillActive;
+    }
+
+    public boolean beginArdynOverkill() {
+        if (legacy != LuciiLegacy.ARDYN || ardynOverkillActive) {
+            return false;
+        }
+
+        ardynOverkillActive = true;
+        mana = 0;
+        manaRegenDelay = 0;
+        regenTimer = 0;
+        return true;
+    }
+
+    public void endArdynOverkill() {
+        ardynOverkillActive = false;
+        regenTimer = 0;
+        manaRegenDelay = 0;
+    }
+
     public void setRoyalArmsFilter(RoyalArmsInventoryFilter filter) {
         royalArmsFilter = filter == null ? RoyalArmsInventoryFilter.ALL : filter;
     }
@@ -102,7 +129,8 @@ public final class LuciiPlayerState {
             return true;
         }
 
-        if (mana < amount) {
+        // During Overkill the mana bar is a recovery timer, not a spendable resource.
+        if (ardynOverkillActive || mana < amount) {
             return false;
         }
 
@@ -113,7 +141,7 @@ public final class LuciiPlayerState {
     }
 
     public boolean hasMana(int amount) {
-        return amount <= 0 || mana >= amount;
+        return !ardynOverkillActive && (amount <= 0 || mana >= amount);
     }
 
     public void addExperience(int amount) {
@@ -131,6 +159,17 @@ public final class LuciiPlayerState {
     }
 
     public void tick() {
+        if (ardynOverkillActive) {
+            regenTimer++;
+            if (regenTimer >= ARDYN_OVERKILL_MANA_REGEN_INTERVAL) {
+                regenTimer = 0;
+                if (mana < maxMana) {
+                    mana++;
+                }
+            }
+            return;
+        }
+
         if (manaRegenDelay > 0) {
             manaRegenDelay--;
             return;
@@ -156,7 +195,19 @@ public final class LuciiPlayerState {
         royalArmsActive = nbt.getBoolean(ROYAL_ARMS_ACTIVE_KEY) && hasLegacy();
         royalArmsFilter = RoyalArmsInventoryFilter.byOrdinal(nbt.getInt(ROYAL_ARMS_FILTER_KEY));
         setArdynWarpCharges(nbt.getInt(ARDYN_WARP_CHARGES_KEY));
-        mana = Math.min(mana, maxMana);
+        mana = Math.min(Math.max(0, mana), maxMana);
+        regenTimer = Math.max(0, nbt.getInt(REGEN_TIMER_KEY));
+        manaRegenDelay = Math.max(0, nbt.getInt(MANA_REGEN_DELAY_KEY));
+        ardynOverkillActive = nbt.getBoolean(ARDYN_OVERKILL_ACTIVE_KEY)
+                && legacy == LuciiLegacy.ARDYN
+                && mana < maxMana;
+
+        if (ardynOverkillActive) {
+            // Preserve the exact online recovery position, but never advance it while offline.
+            // The interval is clamped so old/corrupt NBT cannot instantly refill mana on login.
+            regenTimer = Math.min(regenTimer, ARDYN_OVERKILL_MANA_REGEN_INTERVAL - 1);
+            manaRegenDelay = 0;
+        }
     }
 
     public void writeNbt(NbtCompound nbt) {
@@ -168,6 +219,9 @@ public final class LuciiPlayerState {
         nbt.putBoolean(ROYAL_ARMS_ACTIVE_KEY, royalArmsActive);
         nbt.putInt(ROYAL_ARMS_FILTER_KEY, royalArmsFilter.ordinal());
         nbt.putInt(ARDYN_WARP_CHARGES_KEY, ardynWarpCharges);
+        nbt.putBoolean(ARDYN_OVERKILL_ACTIVE_KEY, ardynOverkillActive);
+        nbt.putInt(REGEN_TIMER_KEY, regenTimer);
+        nbt.putInt(MANA_REGEN_DELAY_KEY, manaRegenDelay);
     }
 
     private int experienceForNextLevel() {
