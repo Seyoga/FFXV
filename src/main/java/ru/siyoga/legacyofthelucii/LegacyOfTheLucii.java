@@ -24,9 +24,11 @@ import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerStates;
 import ru.siyoga.legacyofthelucii.legacy.RoyalArmsInventoryFilter;
 import ru.siyoga.legacyofthelucii.network.ArdynOverkillNetwork;
 import ru.siyoga.legacyofthelucii.network.LuciiNetwork;
+import ru.siyoga.legacyofthelucii.network.RoyalArmsGuardNetwork;
 import ru.siyoga.legacyofthelucii.royalarms.ability.ArdynOverkillAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.ArdynShadowStepAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsBindAbility;
+import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsGuardAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsOrbitDamageAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsWallAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsWarpStrikeAbility;
@@ -48,6 +50,7 @@ public final class LegacyOfTheLucii implements ModInitializer {
         ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.ROYAL_ARMS_WARP_PACKET, LegacyOfTheLucii::handleRoyalArmsWarp);
         ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.ROYAL_ARMS_BIND_PACKET, LegacyOfTheLucii::handleRoyalArmsBind);
         ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.ARDYN_SHADOW_STEP_PACKET, LegacyOfTheLucii::handleArdynShadowStep);
+        ServerPlayNetworking.registerGlobalReceiver(RoyalArmsGuardNetwork.TOGGLE_PACKET, LegacyOfTheLucii::handleRoyalArmsGuard);
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             LuciiNetwork.sendState(handler.player);
             // Restore all active forms for the joining client, including its own persisted state.
@@ -63,12 +66,14 @@ public final class LegacyOfTheLucii implements ModInitializer {
             RoyalArmsWarpStrikeAbility.clearAll(handler.player);
             RoyalArmsBindAbility.clearAll(handler.player);
             ArdynShadowStepAbility.clearAll(handler.player);
+            RoyalArmsGuardAbility.clearAll(handler.player);
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
             RoyalArmsWallAbility.clearAll(server);
             RoyalArmsWarpStrikeAbility.clearAll(server);
             RoyalArmsBindAbility.clearAll(server);
             ArdynShadowStepAbility.clearAll(server);
+            RoyalArmsGuardAbility.clearAll(server);
         });
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             RoyalArmsOrbitDamageAbility.tick(server);
@@ -76,6 +81,7 @@ public final class LegacyOfTheLucii implements ModInitializer {
             RoyalArmsWarpStrikeAbility.tick(server);
             RoyalArmsBindAbility.tick(server);
             ArdynShadowStepAbility.tick(server);
+            RoyalArmsGuardAbility.tick(server);
 
             for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
                 LuciiPlayerStates.get(player).tick();
@@ -105,6 +111,7 @@ public final class LegacyOfTheLucii implements ModInitializer {
             RoyalArmsWarpStrikeAbility.clearAll(oldPlayer);
             RoyalArmsBindAbility.clearAll(oldPlayer);
             ArdynShadowStepAbility.clearAll(oldPlayer);
+            RoyalArmsGuardAbility.clearAll(oldPlayer);
 
             NbtCompound nbt = new NbtCompound();
             LuciiPlayerState oldState = LuciiPlayerStates.get(oldPlayer);
@@ -164,6 +171,7 @@ public final class LegacyOfTheLucii implements ModInitializer {
             if (!state.royalArmsActive()) {
                 RoyalArmsWallAbility.deactivate(player, false);
                 RoyalArmsBindAbility.clearAll(player);
+                RoyalArmsGuardAbility.clearAll(player);
             }
             LuciiNetwork.sendState(player);
             LuciiNetwork.broadcastRoyalArmsVisual(player);
@@ -210,6 +218,17 @@ public final class LegacyOfTheLucii implements ModInitializer {
     ) {
         boolean active = buf.readBoolean();
         server.execute(() -> ArdynShadowStepAbility.setActive(player, active));
+    }
+
+    private static void handleRoyalArmsGuard(
+            net.minecraft.server.MinecraftServer server,
+            ServerPlayerEntity player,
+            net.minecraft.server.network.ServerPlayNetworkHandler handler,
+            PacketByteBuf buf,
+            PacketSender responseSender
+    ) {
+        boolean active = buf.readBoolean();
+        server.execute(() -> RoyalArmsGuardAbility.setActive(player, active));
     }
 
     private static void handleRoyalArmsFilter(
