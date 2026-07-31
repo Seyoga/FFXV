@@ -150,14 +150,29 @@ public final class LegacyOfTheLuciiClient implements ClientModInitializer {
             client.execute(() -> RoyalArmsBindClient.update(ownerUuid, targetEntityId, targetCenter, active, impaled, legacy, stacks));
         });
         ClientPlayNetworking.registerGlobalReceiver(RoyalArmsGuardNetwork.STATE_PACKET, (client, handler, buf, responseSender) -> {
+            UUID ownerUuid = buf.readUuid();
             boolean active = buf.readBoolean();
-            client.execute(() -> RoyalArmsGuardClient.updateState(active));
+            client.execute(() -> RoyalArmsGuardClient.updateState(ownerUuid, active));
         });
         ClientPlayNetworking.registerGlobalReceiver(RoyalArmsGuardNetwork.BLOCK_VISUAL_PACKET, (client, handler, buf, responseSender) -> {
             UUID ownerUuid = buf.readUuid();
             Vec3d interceptPos = new Vec3d(buf.readDouble(), buf.readDouble(), buf.readDouble());
             Vec3d incomingVelocity = new Vec3d(buf.readDouble(), buf.readDouble(), buf.readDouble());
-            client.execute(() -> RoyalArmsGuardClient.block(ownerUuid, interceptPos, incomingVelocity));
+            int travelTicks = buf.readVarInt();
+            int layer = buf.readVarInt();
+            client.execute(() -> RoyalArmsGuardClient.block(
+                    ownerUuid,
+                    interceptPos,
+                    incomingVelocity,
+                    travelTicks,
+                    layer
+            ));
+        });
+        ClientPlayNetworking.registerGlobalReceiver(RoyalArmsGuardNetwork.EXPLOSION_VISUAL_PACKET, (client, handler, buf, responseSender) -> {
+            UUID ownerUuid = buf.readUuid();
+            int itemCount = buf.readVarInt();
+            float protection = buf.readFloat();
+            client.execute(() -> RoyalArmsGuardClient.explosion(ownerUuid, itemCount, protection));
         });
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             // Clear client-only Wither hearts and the color filter before the old

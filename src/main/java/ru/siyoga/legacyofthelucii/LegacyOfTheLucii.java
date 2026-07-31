@@ -2,6 +2,7 @@ package ru.siyoga.legacyofthelucii;
 
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.entity.event.v1.ServerEntityCombatEvents;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -13,6 +14,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,17 +53,27 @@ public final class LegacyOfTheLucii implements ModInitializer {
         ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.ROYAL_ARMS_BIND_PACKET, LegacyOfTheLucii::handleRoyalArmsBind);
         ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.ARDYN_SHADOW_STEP_PACKET, LegacyOfTheLucii::handleArdynShadowStep);
         ServerPlayNetworking.registerGlobalReceiver(RoyalArmsGuardNetwork.TOGGLE_PACKET, LegacyOfTheLucii::handleRoyalArmsGuard);
+        ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
+            if (entity instanceof ServerPlayerEntity player) {
+                return RoyalArmsGuardAbility.allowDamage(player, source, amount);
+            }
+            return true;
+        });
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             LuciiNetwork.sendState(handler.player);
             // Restore all active forms for the joining client, including its own persisted state.
             ArdynOverkillNetwork.sendAllStates(handler.player);
             // Existing clients also need the rejoining player's restored state.
             ArdynOverkillNetwork.broadcastState(handler.player);
+            RoyalArmsGuardNetwork.sendAllStates(handler.player);
         });
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             // This only clears remote client visuals for the absent entity. The server-side
             // Overkill flag and mana remain in player NBT and resume on the next login.
             ArdynOverkillNetwork.broadcastState(handler.player, false);
+            if (handler.player.getWorld() instanceof ServerWorld world) {
+                RoyalArmsGuardNetwork.broadcastState(world, handler.player, false);
+            }
             RoyalArmsWallAbility.clearAll(handler.player);
             RoyalArmsWarpStrikeAbility.clearAll(handler.player);
             RoyalArmsBindAbility.clearAll(handler.player);
@@ -75,16 +87,24 @@ public final class LegacyOfTheLucii implements ModInitializer {
             ArdynShadowStepAbility.clearAll(server);
             RoyalArmsGuardAbility.clearAll(server);
         });
+        ServerTickEvents.START_SERVER_TICK.register(RoyalArmsGuardAbility::tick);
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             RoyalArmsOrbitDamageAbility.tick(server);
             RoyalArmsWallAbility.tick(server);
             RoyalArmsWarpStrikeAbility.tick(server);
             RoyalArmsBindAbility.tick(server);
             ArdynShadowStepAbility.tick(server);
-            RoyalArmsGuardAbility.tick(server);
 
             for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
-                LuciiPlayerStates.get(player).tick();
+                LuciiPlayerState state = LuciiPlayerStates.get(player);
+                if (player.getAbilities().creativeMode) {
+                    if (state.restoreMana()) {
+                        LuciiNetwork.sendState(player);
+                    }
+                    continue;
+                }
+
+                state.tick();
             }
             ArdynOverkillAbility.tick(server);
 
@@ -94,6 +114,10 @@ public final class LegacyOfTheLucii implements ModInitializer {
                     LuciiNetwork.sendState(player);
                     if (state.royalArmsActive()) {
                         LuciiNetwork.broadcastRoyalArmsVisual(player);
+                    }
+                    if (RoyalArmsGuardAbility.isActive(player.getUuid())
+                            && player.getWorld() instanceof ServerWorld world) {
+                        RoyalArmsGuardNetwork.broadcastState(world, player, true);
                     }
                 }
             }
@@ -138,6 +162,10 @@ public final class LegacyOfTheLucii implements ModInitializer {
             // authoritative state here rather than only from COPY_FROM, which is documented
             // to run before the respawn is completely finished.
             LuciiNetwork.sendState(newPlayer);
+            RoyalArmsGuardAbility.clearAll(newPlayer);
+            if (newPlayer.getWorld() instanceof ServerWorld world) {
+                RoyalArmsGuardNetwork.broadcastState(world, newPlayer, false);
+            }
             ArdynOverkillNetwork.broadcastState(newPlayer, alive && newState.ardynOverkillActive());
             LuciiNetwork.broadcastRoyalArmsVisual(newPlayer);
 
@@ -172,6 +200,9 @@ public final class LegacyOfTheLucii implements ModInitializer {
                 RoyalArmsWallAbility.deactivate(player, false);
                 RoyalArmsBindAbility.clearAll(player);
                 RoyalArmsGuardAbility.clearAll(player);
+                if (player.getWorld() instanceof ServerWorld world) {
+                    RoyalArmsGuardNetwork.broadcastState(world, player, false);
+                }
             }
             LuciiNetwork.sendState(player);
             LuciiNetwork.broadcastRoyalArmsVisual(player);
