@@ -15,6 +15,7 @@ import ru.siyoga.legacyofthelucii.client.config.LegacyClientConfig;
 import ru.siyoga.legacyofthelucii.client.gui.skilltree.SkillTreeKeybindings;
 import ru.siyoga.legacyofthelucii.client.hud.LuciiHudOverlay;
 import ru.siyoga.legacyofthelucii.client.royalarms.RoyalArmsAbility;
+import ru.siyoga.legacyofthelucii.client.royalarms.RoyalArmsGuardClient;
 import ru.siyoga.legacyofthelucii.client.royalarms.RoyalArmsWallClient;
 import ru.siyoga.legacyofthelucii.client.royalarms.ardyn.ArdynBarrageWeaponRenderer;
 import ru.siyoga.legacyofthelucii.client.royalarms.ardyn.ArdynOverkillClient;
@@ -29,6 +30,7 @@ import ru.siyoga.legacyofthelucii.entity.LegacyEntities;
 import ru.siyoga.legacyofthelucii.legacy.LuciiLegacy;
 import ru.siyoga.legacyofthelucii.network.ArdynOverkillNetwork;
 import ru.siyoga.legacyofthelucii.network.LuciiNetwork;
+import ru.siyoga.legacyofthelucii.network.RoyalArmsGuardNetwork;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -147,6 +149,16 @@ public final class LegacyOfTheLuciiClient implements ClientModInitializer {
             }
             client.execute(() -> RoyalArmsBindClient.update(ownerUuid, targetEntityId, targetCenter, active, impaled, legacy, stacks));
         });
+        ClientPlayNetworking.registerGlobalReceiver(RoyalArmsGuardNetwork.STATE_PACKET, (client, handler, buf, responseSender) -> {
+            boolean active = buf.readBoolean();
+            client.execute(() -> RoyalArmsGuardClient.updateState(active));
+        });
+        ClientPlayNetworking.registerGlobalReceiver(RoyalArmsGuardNetwork.BLOCK_VISUAL_PACKET, (client, handler, buf, responseSender) -> {
+            UUID ownerUuid = buf.readUuid();
+            Vec3d interceptPos = new Vec3d(buf.readDouble(), buf.readDouble(), buf.readDouble());
+            Vec3d incomingVelocity = new Vec3d(buf.readDouble(), buf.readDouble(), buf.readDouble());
+            client.execute(() -> RoyalArmsGuardClient.block(ownerUuid, interceptPos, incomingVelocity));
+        });
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             // Clear client-only Wither hearts and the color filter before the old
             // ClientPlayerEntity is discarded. Otherwise static renderer state can
@@ -159,6 +171,7 @@ public final class LegacyOfTheLuciiClient implements ClientModInitializer {
             RoyalArmsWarpTrailClient.clear();
             ArdynShadowStepClient.clear();
             RoyalArmsBindClient.clear();
+            RoyalArmsGuardClient.reset();
         });
         LuciiHudOverlay.register();
         ArdynOverkillClient.register();

@@ -57,6 +57,7 @@ public final class RoyalArmsAbility {
     private static final float ITEM_SPIN_SPEED = 3.0F;
     private static final int APPEAR_TICKS = 24;
     private static final int DISAPPEAR_TICKS = 24;
+    private static final int GUARD_BLOCK_TICKS = 10;
     private static final int INVENTORY_REFRESH_TICKS = 10;
     private static final int ATTACK_EQUIP_COOLDOWN_TICKS = 5;
     private static final String CATEGORY = "key.categories.legacyofthelucii";
@@ -67,6 +68,7 @@ public final class RoyalArmsAbility {
     private static final List<FloatingItem> floatingItems = new ArrayList<>();
     private static final Map<UUID, RemoteRoyalArmsVisual> remoteVisuals = new HashMap<>();
     private static final List<UUID> ardynBarrageOwners = new ArrayList<>();
+    private static final List<GuardBlockVisual> guardBlockVisuals = new ArrayList<>();
     private static boolean lastActive;
     private static RoyalArmsInventoryFilter currentFilter = RoyalArmsInventoryFilter.ALL;
     private static Vec3d lastPlayerPos;
@@ -151,6 +153,7 @@ public final class RoyalArmsAbility {
 
         tickClosingAura();
         tickRemoteVisuals();
+        tickGuardBlocks();
 
         if (client.player != null && client.world != null && (active || hasClosingLocalItems())) {
             updateLocalPlayerPosition(client);
@@ -295,6 +298,7 @@ public final class RoyalArmsAbility {
         }
 
         renderRemoteVisuals(context, client, cameraPos, spinTime, tickDelta);
+        renderGuardBlocks(context, cameraPos, tickDelta);
     }
 
     private static void renderFloatingItem(
@@ -398,6 +402,26 @@ public final class RoyalArmsAbility {
                 int seed = (i + 1) * 31 + Registries.ITEM.getId(stack.getItem()).hashCode();
                 renderItemPass(context, stack, seed, itemPos, cameraPos, lookAngle, spin, ITEM_BASE_SCALE * item.visualScale(tickDelta), palette.baseTint);
             }
+        }
+    }
+
+    private static void renderGuardBlocks(WorldRenderContext context, Vec3d cameraPos, float tickDelta) {
+        if (guardBlockVisuals.isEmpty()) {
+            return;
+        }
+
+        LegacyPalette palette = LegacyPalette.forLegacy(LuciiLegacy.NOCTIS);
+        for (GuardBlockVisual visual : new ArrayList<>(guardBlockVisuals)) {
+            float progress = MathHelper.clamp((visual.age + tickDelta) / (float) GUARD_BLOCK_TICKS, 0.0F, 1.0F);
+            float scale = 1.18F * (1.0F - easeInOutCubic(progress) * 0.35F);
+            float alpha = 0.74F * (1.0F - progress);
+            RenderTint tint = new RenderTint(
+                    palette.targetTint.red,
+                    palette.targetTint.green,
+                    palette.targetTint.blue,
+                    alpha
+            );
+            renderItemPass(context, visual.stack, visual.seed, visual.pos, cameraPos, visual.lookAngle, visual.spinAngle, scale, tint);
         }
     }
 
@@ -651,6 +675,17 @@ public final class RoyalArmsAbility {
         }
     }
 
+    private static void tickGuardBlocks() {
+        if (guardBlockVisuals.isEmpty()) {
+            return;
+        }
+
+        for (GuardBlockVisual visual : guardBlockVisuals) {
+            visual.age++;
+        }
+        guardBlockVisuals.removeIf(GuardBlockVisual::finished);
+    }
+
     private static void startClosingAura() {
         if (floatingItems.isEmpty()) {
             clearAura();
@@ -719,9 +754,51 @@ public final class RoyalArmsAbility {
     public static void clearRemoteVisuals() {
         remoteVisuals.clear();
         ardynBarrageOwners.clear();
+        guardBlockVisuals.clear();
         clearAura();
         lastActive = false;
         toggleLockTicks = 0;
+    }
+
+    public static void beginGuardBlock(UUID ownerUuid, Vec3d interceptPos, Vec3d incomingVelocity) {
+        ItemStack stack = findGuardStack(ownerUuid);
+        if (stack.isEmpty()) {
+            return;
+        }
+
+        Vec3d direction = incomingVelocity.lengthSquared() > 0.0D
+                ? incomingVelocity.normalize()
+                : new Vec3d(0.0D, 0.0D, 1.0D);
+        float lookAngle = (float) Math.toDegrees(Math.atan2(-direction.x, -direction.z));
+        float spinAngle = spinPhaseFor(stack);
+        int seed = ownerUuid.hashCode() ^ guardBlockVisuals.size() * 31 ^ Registries.ITEM.getId(stack.getItem()).hashCode();
+        guardBlockVisuals.add(new GuardBlockVisual(stack, interceptPos, lookAngle, spinAngle, seed));
+    }
+
+    public static void clearGuardBlocks() {
+        guardBlockVisuals.clear();
+    }
+
+    private static ItemStack findGuardStack(UUID ownerUuid) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.player != null && client.player.getUuid().equals(ownerUuid)) {
+            for (FloatingItem item : floatingItems) {
+                if (!item.stack.isEmpty()) {
+                    return item.stack.copyWithCount(1);
+                }
+            }
+        }
+
+        RemoteRoyalArmsVisual visual = remoteVisuals.get(ownerUuid);
+        if (visual != null) {
+            for (RemoteFloatingItem item : visual.items) {
+                if (!item.stack.isEmpty()) {
+                    return item.stack.copyWithCount(1);
+                }
+            }
+        }
+
+        return ItemStack.EMPTY;
     }
 
     public static void updateArdynBarrage(UUID ownerUuid, boolean active) {
@@ -972,6 +1049,27 @@ public final class RoyalArmsAbility {
 
         private boolean finishedClosing() {
             return closeTicks >= DISAPPEAR_TICKS;
+        }
+    }
+
+    private static final class GuardBlockVisual {
+        private final ItemStack stack;
+        private final Vec3d pos;
+        private final float lookAngle;
+        private final float spinAngle;
+        private final int seed;
+        private int age;
+
+        private GuardBlockVisual(ItemStack stack, Vec3d pos, float lookAngle, float spinAngle, int seed) {
+            this.stack = stack;
+            this.pos = pos;
+            this.lookAngle = lookAngle;
+            this.spinAngle = spinAngle;
+            this.seed = seed;
+        }
+
+        private boolean finished() {
+            return age >= GUARD_BLOCK_TICKS;
         }
     }
 
