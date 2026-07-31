@@ -1,5 +1,7 @@
 package ru.siyoga.legacyofthelucii.royalarms.ability;
 
+import org.joml.Vector3f;
+
 import net.minecraft.particle.DustParticleEffect;
 import net.minecraft.particle.ParticleTypes;
 import net.minecraft.server.MinecraftServer;
@@ -7,9 +9,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvents;
-import net.minecraft.text.Text;
 import net.minecraft.util.math.Vec3d;
-import org.joml.Vector3f;
 import ru.siyoga.legacyofthelucii.legacy.LuciiLegacy;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerState;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerStates;
@@ -64,7 +64,6 @@ public final class ArdynOverkillAbility {
                 0.62F
         );
         spawnTransitionBurst(player.getServerWorld(), player, true);
-        player.sendMessage(Text.translatable("message.legacyofthelucii.ardyn.overkill.enter"), true);
         LuciiNetwork.sendState(player);
         ArdynOverkillNetwork.broadcastState(player);
         return true;
@@ -103,7 +102,6 @@ public final class ArdynOverkillAbility {
                     0.72F
             );
             spawnTransitionBurst(player.getServerWorld(), player, false);
-            player.sendMessage(Text.translatable("message.legacyofthelucii.ardyn.overkill.exit"), true);
         }
         LuciiNetwork.sendState(player);
         ArdynOverkillNetwork.broadcastState(player);

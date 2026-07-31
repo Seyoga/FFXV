@@ -6,7 +6,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
-import ru.siyoga.legacyofthelucii.client.state.ArdynOverkillClientState;
+import ru.siyoga.legacyofthelucii.client.state.ClientLuciiState;
 
 /**
  * Replaces only the HUD heart texture selected by vanilla.
@@ -19,15 +19,19 @@ import ru.siyoga.legacyofthelucii.client.state.ArdynOverkillClientState;
  */
 @Mixin(targets = "net.minecraft.client.gui.hud.InGameHud$HeartType")
 public abstract class LivingEntityClientMixin {
-    @Inject(method = "fromPlayerState", at = @At("RETURN"), cancellable = true)
+    @Inject(
+            method = "fromPlayerState(Lnet/minecraft/entity/player/PlayerEntity;)Lnet/minecraft/client/gui/hud/InGameHud$HeartType;",
+            at = @At("RETURN"),
+            cancellable = true
+    )
     private static void legacyOfTheLucii$useWitheredHeartTextureDuringOverkill(
             PlayerEntity player,
             CallbackInfoReturnable<Object> cir
     ) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null
-                || player != client.player
-                || !ArdynOverkillClientState.active(client.player.getUuid())) {
+                || !player.getUuid().equals(client.player.getUuid())
+                || !ClientLuciiState.ardynOverkillActive()) {
             return;
         }
 
@@ -36,20 +40,18 @@ public abstract class LivingEntityClientMixin {
             return;
         }
 
-        if ("WITHERED".equals(currentEnum.name())) {
-            return;
-        }
-
-        try {
-            cir.setReturnValue(findWitheredHeartType(currentEnum));
-        } catch (IllegalArgumentException ignored) {
-            // Fail safely if another Minecraft version changes the vanilla enum.
+        Object withered = findWitheredHeartType(currentEnum);
+        if (withered != null && currentHeartType != withered) {
+            cir.setReturnValue(withered);
         }
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
     private static Object findWitheredHeartType(Enum<?> currentHeartType) {
-        Class enumClass = currentHeartType.getDeclaringClass();
-        return Enum.valueOf(enumClass, "WITHERED");
+        Object[] constants = currentHeartType.getDeclaringClass().getEnumConstants();
+        // In Minecraft 1.20.1 HeartType is declared as:
+        // CONTAINER, NORMAL, POISONED, WITHERED, ABSORBING, FROZEN.
+        // Using ordinal 3 is remap-safe; Enum.valueOf("WITHERED") is not, because
+        // enum constant names are obfuscated outside the named development runtime.
+        return constants != null && constants.length > 3 ? constants[3] : null;
     }
 }

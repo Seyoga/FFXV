@@ -11,7 +11,8 @@
     "AbstractClientPlayerEntityMixin",
     "EntityRenderDispatcherMixin",
     "PlayerEntityRendererMixin",
-    "LivingEntityClientMixin"
+    "LivingEntityClientMixin",
+    "InGameHudMixin"
   ],
   "injectors": {
     "defaultRequire": 1
