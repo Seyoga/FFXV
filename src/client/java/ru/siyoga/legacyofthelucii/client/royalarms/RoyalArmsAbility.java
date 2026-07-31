@@ -163,9 +163,9 @@ public final class RoyalArmsAbility {
         updateOrbitSpeedState(client);
         previousOrbitTime = orbitTime;
         previousItemSpinAngle = itemSpinAngle;
-        boolean transitioning = hasTransitioningLocalItems();
-        if (!transitioning) {
-            orbitTime += currentOrbitSpeed(client);
+        float orbitSpeed = currentOrbitSpeed(client);
+        orbitTime += orbitSpeed;
+        if (orbitSpeed != 0.0F) {
             itemSpinAngle = (itemSpinAngle + ITEM_SPIN_SPEED) % 360.0F;
         }
 
@@ -278,7 +278,8 @@ public final class RoyalArmsAbility {
         Vec3d cameraPos = context.camera().getPos();
         float tickDelta = context.tickDelta();
         float time = MathHelper.lerp(tickDelta, previousOrbitTime, orbitTime);
-        float spinAngle = MathHelper.lerp(tickDelta, previousItemSpinAngle, itemSpinAngle);
+        float spinAngle = previousItemSpinAngle
+                + MathHelper.wrapDegrees(itemSpinAngle - previousItemSpinAngle) * tickDelta;
         float spinTime = client.world.getTime() + tickDelta;
 
         if (!floatingItems.isEmpty()
@@ -606,15 +607,6 @@ public final class RoyalArmsAbility {
     private static boolean hasClosingLocalItems() {
         for (FloatingItem item : floatingItems) {
             if (item.closing) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean hasTransitioningLocalItems() {
-        for (FloatingItem item : floatingItems) {
-            if (item.isTransitioning()) {
                 return true;
             }
         }

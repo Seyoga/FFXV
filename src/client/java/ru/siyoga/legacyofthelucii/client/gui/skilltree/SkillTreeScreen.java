@@ -149,6 +149,7 @@ public final class SkillTreeScreen extends Screen {
             renderSkillNode(context, x + PAGE_WIDTH / 2 - 55 + (int) Math.round(scrollX), y + PAGE_HEIGHT / 2 - SKILL_FRAME_SIZE / 2 + (int) Math.round(scrollY), Items.ENDER_EYE.getDefaultStack(), Text.translatable("skill.legacyofthelucii.ardyn.shadow_step"), mouseX, mouseY);
             renderSkillNode(context, x + PAGE_WIDTH / 2 - 13 + (int) Math.round(scrollX), y + PAGE_HEIGHT / 2 - SKILL_FRAME_SIZE / 2 + (int) Math.round(scrollY), Items.ENDER_PEARL.getDefaultStack(), Text.translatable("skill.legacyofthelucii.ardyn.warp"), mouseX, mouseY);
             renderSkillNode(context, x + PAGE_WIDTH / 2 + 29 + (int) Math.round(scrollX), y + PAGE_HEIGHT / 2 - SKILL_FRAME_SIZE / 2 + (int) Math.round(scrollY), Items.CROSSBOW.getDefaultStack(), Text.translatable("skill.legacyofthelucii.royal_arms.bind"), mouseX, mouseY);
+            renderSkillNode(context, x + PAGE_WIDTH / 2 + 71 + (int) Math.round(scrollX), y + PAGE_HEIGHT / 2 - SKILL_FRAME_SIZE / 2 + (int) Math.round(scrollY), Items.SPECTRAL_ARROW.getDefaultStack(), Text.translatable("skill.legacyofthelucii.ardyn.barrage"), mouseX, mouseY);
             return;
         }
 

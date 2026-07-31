@@ -27,7 +27,13 @@ public final class ArdynBarrageWeaponEntity extends ProjectileEntity {
     public static final int STATE_RECALLING = 3;
 
     private static final int RECALL_FLIGHT_TICKS = 20;
-    private static final double EMBED_DEPTH = 0.14D;
+    private static final double BLOCK_EMBED_DEPTH = 0.14D;
+    private static final double ENTITY_EMBED_DEPTH = 0.46D;
+    private static final double AIR_DRAG = 0.99D;
+    private static final double WATER_DRAG = 0.80D;
+    private static final double GRAVITY = 0.055D;
+    private static final double MIN_FLIGHT_SPEED_SQUARED = 1.0E-6D;
+    private static final float HIT_HEAL_AMOUNT = 0.5F;
     private static final DustParticleEffect TRAIL_PARTICLE = new DustParticleEffect(new Vector3f(1.0F, 0.28F, 0.38F), 1.05F);
     private static final DustParticleEffect RECALL_PARTICLE = new DustParticleEffect(new Vector3f(0.72F, 0.08F, 0.16F), 1.35F);
 
@@ -57,10 +63,8 @@ public final class ArdynBarrageWeaponEntity extends ProjectileEntity {
     );
 
     private float damage;
-    private int flightTicks;
-    private int maxFlightTicks = 18;
     private LivingEntity attachedEntity;
-    private Vec3d attachedOffset = Vec3d.ZERO;
+    private Vec3d attachedCenterOffset = Vec3d.ZERO;
 
     private boolean recallScheduled;
     private int recallDelay;
@@ -74,11 +78,10 @@ public final class ArdynBarrageWeaponEntity extends ProjectileEntity {
         this.setInvulnerable(true);
     }
 
-    public void configure(ServerPlayerEntity owner, ItemStack stack, Vec3d velocity, float damage, int maxFlightTicks) {
+    public void configure(ServerPlayerEntity owner, ItemStack stack, Vec3d velocity, float damage) {
         setOwner(owner);
         setWeaponStack(stack);
         this.damage = damage;
-        this.maxFlightTicks = Math.max(1, maxFlightTicks);
         setVelocity(velocity);
         setRenderDirection(velocity);
         setState(STATE_FLYING);
@@ -161,9 +164,11 @@ public final class ArdynBarrageWeaponEntity extends ProjectileEntity {
 
     private void tickFlying(ServerWorld world) {
         Vec3d velocity = getVelocity();
-        if (velocity.lengthSquared() < 1.0E-6D) {
-            stickInWorld(getPos(), getRenderDirection());
-            return;
+        if (velocity.lengthSquared() < MIN_FLIGHT_SPEED_SQUARED) {
+            // Never freeze a missed blade in empty space. A nearly stopped projectile
+            // starts falling vertically until it collides with a block or gets recalled.
+            velocity = new Vec3d(0.0D, -GRAVITY, 0.0D);
+            setVelocity(velocity);
         }
 
         Vec3d previous = getPos();
@@ -177,33 +182,41 @@ public final class ArdynBarrageWeaponEntity extends ProjectileEntity {
         }
         if (hit.getType() == HitResult.Type.BLOCK && hit instanceof BlockHitResult blockHit) {
             Vec3d direction = velocity.normalize();
-            stickInWorld(blockHit.getPos().subtract(direction.multiply(EMBED_DEPTH)), direction);
+            stickInWorld(blockHit.getPos().subtract(direction.multiply(BLOCK_EMBED_DEPTH)), direction);
             spawnImpactBurst(world, blockHit.getPos(), 7);
             return;
         }
 
         Vec3d next = previous.add(velocity);
         setPosition(next.x, next.y, next.z);
-        setRenderDirection(velocity);
         spawnTrail(world, previous, next);
-        flightTicks++;
-        if (flightTicks >= maxFlightTicks) {
-            stickInWorld(next, velocity.normalize());
-        }
+
+        // Arrow-like flight: retain most horizontal speed, lose a little energy to drag,
+        // and continuously gain downward velocity. Missed blades therefore arc and land
+        // instead of stopping after an arbitrary number of ticks.
+        double drag = isTouchingWater() ? WATER_DRAG : AIR_DRAG;
+        Vec3d nextVelocity = velocity.multiply(drag).add(0.0D, -GRAVITY, 0.0D);
+        setVelocity(nextVelocity);
+        setRenderDirection(nextVelocity);
     }
 
     private void hitEntity(ServerWorld world, LivingEntity target, Vec3d hitPos) {
         Entity owner = getOwner();
-        if (owner instanceof ServerPlayerEntity player) {
-            target.damage(player.getDamageSources().playerAttack(player), damage);
+        if (owner instanceof ServerPlayerEntity player
+                && target.damage(player.getDamageSources().playerAttack(player), damage)) {
+            player.heal(HIT_HEAL_AMOUNT);
         }
 
-        Vec3d direction = getVelocity().lengthSquared() > 1.0E-6D
+        Vec3d direction = getVelocity().lengthSquared() > MIN_FLIGHT_SPEED_SQUARED
                 ? getVelocity().normalize()
                 : getRenderDirection();
-        Vec3d lodgedPos = hitPos.subtract(direction.multiply(EMBED_DEPTH));
+
+        // Move the model origin behind the collision point while keeping its tip aimed
+        // along the impact direction. This gives the same visibly impaled result as Bind
+        // instead of leaving the whole item floating on the surface of the target.
+        Vec3d lodgedPos = hitPos.subtract(direction.multiply(ENTITY_EMBED_DEPTH));
         attachedEntity = target;
-        attachedOffset = lodgedPos.subtract(target.getPos());
+        attachedCenterOffset = lodgedPos.subtract(target.getBoundingBox().getCenter());
         setPosition(lodgedPos.x, lodgedPos.y, lodgedPos.z);
         setVelocity(Vec3d.ZERO);
         setRenderDirection(direction);
@@ -219,13 +232,14 @@ public final class ArdynBarrageWeaponEntity extends ProjectileEntity {
             return;
         }
 
-        Vec3d next = attachedEntity.getPos().add(attachedOffset);
+        Vec3d next = attachedEntity.getBoundingBox().getCenter().add(attachedCenterOffset);
         setPosition(next.x, next.y, next.z);
         setVelocity(Vec3d.ZERO);
     }
 
     private void stickInWorld(Vec3d pos, Vec3d direction) {
         attachedEntity = null;
+        attachedCenterOffset = Vec3d.ZERO;
         setPosition(pos.x, pos.y, pos.z);
         setVelocity(Vec3d.ZERO);
         setRenderDirection(direction);
@@ -256,6 +270,7 @@ public final class ArdynBarrageWeaponEntity extends ProjectileEntity {
                 .add(sideways.multiply(sideOffset))
                 .add(0.0D, lift, 0.0D);
         attachedEntity = null;
+        attachedCenterOffset = Vec3d.ZERO;
         setState(STATE_RECALLING);
         setRecallProgress(0.0F);
         setVelocity(Vec3d.ZERO);
