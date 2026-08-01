@@ -29,6 +29,7 @@ import org.joml.Vector3f;
 import ru.siyoga.legacyofthelucii.LegacyOfTheLucii;
 import ru.siyoga.legacyofthelucii.entity.ArdynBarrageWeaponEntity;
 import ru.siyoga.legacyofthelucii.entity.LegacyEntities;
+import ru.siyoga.legacyofthelucii.effect.Demonization;
 import ru.siyoga.legacyofthelucii.legacy.LuciiLegacy;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerState;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerStates;
@@ -91,6 +92,11 @@ public final class RoyalArmsWarpStrikeAbility {
     private static final double ARDYN_ARC_HEIGHT = 0.3D;
     private static final double ARDYN_MAX_ARC_ABOVE_THROW = 0.85D;
     private static final double ARDYN_THROW_FORWARD_OFFSET = 2.55D;
+    private static final double ARDYN_EMPTY_HAND_DASH_DISTANCE = 3.0D;
+    private static final double ARDYN_EMPTY_HAND_DASH_DAMAGE_RADIUS = 0.85D;
+    private static final int ARDYN_EMPTY_HAND_CHARGE_TICKS = 6;
+    private static final float ARDYN_EMPTY_HAND_DAMAGE = 1.5F;
+    private static final int DEMONIZATION_STRENGTH = 0;
     private static final float FIST_DAMAGE = 1.0F;
     private static final float WEAPON_DAMAGE_MULTIPLIER = 0.5F;
     private static final DustParticleEffect NOCTIS_TRAIL_PARTICLE = new DustParticleEffect(new Vector3f(0.36F, 0.62F, 1.0F), 1.15F);
@@ -99,12 +105,14 @@ public final class RoyalArmsWarpStrikeAbility {
 
     private static final Map<UUID, ActiveWarp> ACTIVE_WARPS = new HashMap<>();
     private static final Map<UUID, ActiveArdynBarrage> ACTIVE_ARDYN_BARRAGES = new HashMap<>();
+    private static final Map<UUID, ActiveArdynEmptyHandDash> ACTIVE_ARDYN_EMPTY_HAND_DASHES = new HashMap<>();
 
     private RoyalArmsWarpStrikeAbility() {
     }
 
     public static void tick(MinecraftServer server) {
         tickArdynBarrages(server);
+        tickArdynEmptyHandDashes(server);
 
         Iterator<Map.Entry<UUID, ActiveWarp>> iterator = ACTIVE_WARPS.entrySet().iterator();
         while (iterator.hasNext()) {
@@ -150,7 +158,22 @@ public final class RoyalArmsWarpStrikeAbility {
             return;
         }
 
+        if (ACTIVE_ARDYN_EMPTY_HAND_DASHES.containsKey(player.getUuid())) {
+            return;
+        }
+
         if (ACTIVE_ARDYN_BARRAGES.containsKey(player.getUuid())) {
+            return;
+        }
+
+        ItemStack heldStack = player.getMainHandStack();
+
+        if (legacy == LuciiLegacy.ARDYN && heldStack.isEmpty()) {
+            if (!player.getAbilities().creativeMode && !state.hasMana(MANA_COST)) {
+                player.sendMessage(Text.translatable("message.legacyofthelucii.royal_arms.not_enough_mana"), true);
+                return;
+            }
+            startArdynEmptyHandDash(player, state);
             return;
         }
 
@@ -164,7 +187,6 @@ public final class RoyalArmsWarpStrikeAbility {
             return;
         }
 
-        ItemStack heldStack = player.getMainHandStack();
         if (heldStack.isEmpty()) {
             player.sendMessage(Text.translatable("message.legacyofthelucii.royal_arms.warp.requires_item"), true);
             return;
@@ -224,6 +246,10 @@ public final class RoyalArmsWarpStrikeAbility {
             returnHeldItem(player, warp);
             cleanup(warp, player);
         }
+        ActiveArdynEmptyHandDash dash = ACTIVE_ARDYN_EMPTY_HAND_DASHES.remove(player.getUuid());
+        if (dash != null) {
+            cleanupArdynEmptyHandDash(dash, player);
+        }
         ActiveArdynBarrage barrage = ACTIVE_ARDYN_BARRAGES.remove(player.getUuid());
         if (barrage != null) {
             cleanupArdynBarrage(barrage);
@@ -235,6 +261,10 @@ public final class RoyalArmsWarpStrikeAbility {
             clearAll(player);
         }
         ACTIVE_WARPS.clear();
+        for (ActiveArdynEmptyHandDash dash : ACTIVE_ARDYN_EMPTY_HAND_DASHES.values()) {
+            cleanupArdynEmptyHandDash(dash, server.getPlayerManager().getPlayer(dash.ownerUuid));
+        }
+        ACTIVE_ARDYN_EMPTY_HAND_DASHES.clear();
         for (ActiveArdynBarrage barrage : ACTIVE_ARDYN_BARRAGES.values()) {
             cleanupArdynBarrage(barrage);
         }
@@ -258,6 +288,56 @@ public final class RoyalArmsWarpStrikeAbility {
         LuciiNetwork.broadcastArdynBarrage(player.getServerWorld(), player, true);
 
         ACTIVE_ARDYN_BARRAGES.put(player.getUuid(), new ActiveArdynBarrage(player.getUuid(), player.getServerWorld(), stacks));
+    }
+
+    private static void startArdynEmptyHandDash(ServerPlayerEntity player, LuciiPlayerState state) {
+        ServerWorld world = player.getServerWorld();
+        if (!player.getAbilities().creativeMode) {
+            state.spendMana(MANA_COST);
+            LuciiNetwork.sendState(player);
+        }
+
+        Vec3d from = player.getPos();
+        Vec3d target = emptyHandDashTarget(world, player);
+        ACTIVE_ARDYN_EMPTY_HAND_DASHES.put(
+                player.getUuid(),
+                new ActiveArdynEmptyHandDash(player.getUuid(), world, from, target, ARDYN_EMPTY_HAND_CHARGE_TICKS)
+        );
+        LuciiNetwork.broadcastArdynShadowStep(world, player, true);
+    }
+
+    private static void tickArdynEmptyHandDashes(MinecraftServer server) {
+        Iterator<Map.Entry<UUID, ActiveArdynEmptyHandDash>> iterator = ACTIVE_ARDYN_EMPTY_HAND_DASHES.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<UUID, ActiveArdynEmptyHandDash> entry = iterator.next();
+            ServerPlayerEntity player = server.getPlayerManager().getPlayer(entry.getKey());
+            ActiveArdynEmptyHandDash dash = entry.getValue();
+            ServerWorld world = server.getWorld(dash.world.getRegistryKey());
+            if (player == null || world == null || player.isRemoved() || player.isDead()) {
+                cleanupArdynEmptyHandDash(dash, player);
+                iterator.remove();
+                continue;
+            }
+
+            player.fallDistance = 0.0F;
+            if (dash.chargeTicks > 0) {
+                player.setVelocity(Vec3d.ZERO);
+                player.velocityModified = true;
+                spawnArdynEmptyHandCharge(world, player, dash.chargeTicks);
+                dash.chargeTicks--;
+                continue;
+            }
+
+            LuciiNetwork.broadcastRoyalArmsWarpTrail(world, player, dash.from, dash.to, LuciiLegacy.ARDYN);
+            damageArdynEmptyHandDash(player, world, dash.from, dash.to);
+            player.teleport(world, dash.to.x, dash.to.y, dash.to.z, player.getYaw(), player.getPitch());
+            player.setVelocity(Vec3d.ZERO);
+            player.velocityModified = true;
+            player.fallDistance = 0.0F;
+            spawnArdynEmptyHandDashImpact(world, dash.to, player.getRotationVec(1.0F).normalize());
+            cleanupArdynEmptyHandDash(dash, player);
+            iterator.remove();
+        }
     }
 
     private static void tickArdynBarrages(MinecraftServer server) {
@@ -449,6 +529,14 @@ public final class RoyalArmsWarpStrikeAbility {
         }
     }
 
+    private static void cleanupArdynEmptyHandDash(ActiveArdynEmptyHandDash dash, ServerPlayerEntity player) {
+        if (player != null && player.getWorld() instanceof ServerWorld world) {
+            LuciiNetwork.broadcastArdynShadowStep(world, player, false);
+        } else {
+            LuciiNetwork.broadcastArdynShadowStep(dash.world, dash.ownerUuid, false);
+        }
+    }
+
     private static void tickNoctisProjectile(ServerWorld world, ServerPlayerEntity player, ActiveWarp warp) {
         LivingEntity collidedEntity = itemCollisionTarget(world, player, warp);
         if (collidedEntity != null) {
@@ -631,7 +719,7 @@ public final class RoyalArmsWarpStrikeAbility {
                 continue;
             }
 
-            target.damage(player.getDamageSources().playerAttack(player), damage);
+            Demonization.damageOrDemonizeOnLethalHit(player, target, damage, DEMONIZATION_STRENGTH);
             Vec3d knockback = target.getPos().subtract(center);
             if (knockback.lengthSquared() <= 0.0001D) {
                 knockback = player.getRotationVec(1.0F);
@@ -651,6 +739,49 @@ public final class RoyalArmsWarpStrikeAbility {
                 && target != player
                 && !target.isSpectator()
                 && target.getWorld() == player.getWorld();
+    }
+
+    private static Vec3d emptyHandDashTarget(ServerWorld world, ServerPlayerEntity player) {
+        Vec3d look = player.getRotationVec(1.0F).normalize();
+        Vec3d horizontalLook = new Vec3d(look.x, 0.0D, look.z);
+        if (horizontalLook.lengthSquared() < 0.0001D) {
+            horizontalLook = Vec3d.fromPolar(0.0F, player.getYaw());
+        }
+        horizontalLook = horizontalLook.normalize();
+
+        Vec3d start = player.getEyePos();
+        Vec3d end = start.add(horizontalLook.multiply(ARDYN_EMPTY_HAND_DASH_DISTANCE));
+        HitResult hit = world.raycast(new RaycastContext(
+                start,
+                end,
+                RaycastContext.ShapeType.COLLIDER,
+                RaycastContext.FluidHandling.NONE,
+                player
+        ));
+
+        double distance = ARDYN_EMPTY_HAND_DASH_DISTANCE;
+        if (hit.getType() != HitResult.Type.MISS) {
+            distance = Math.max(0.0D, start.distanceTo(hit.getPos()) - 0.55D);
+        }
+        Vec3d target = player.getPos().add(horizontalLook.multiply(distance));
+
+        BlockPos base = BlockPos.ofFloored(target);
+        for (BlockPos pos : new BlockPos[]{base, base.up(), base.down()}) {
+            if (canStandAt(world, pos) && canStandAt(world, pos.up())) {
+                return new Vec3d(target.x, pos.getY(), target.z);
+            }
+        }
+        return player.getPos();
+    }
+
+    private static void damageArdynEmptyHandDash(ServerPlayerEntity player, ServerWorld world, Vec3d from, Vec3d to) {
+        Box sweep = player.getBoundingBox()
+                .offset(from.subtract(player.getPos()))
+                .stretch(to.subtract(from))
+                .expand(ARDYN_EMPTY_HAND_DASH_DAMAGE_RADIUS, 0.35D, ARDYN_EMPTY_HAND_DASH_DAMAGE_RADIUS);
+        for (LivingEntity target : world.getEntitiesByClass(LivingEntity.class, sweep, entity -> canDamage(player, entity))) {
+            Demonization.damageOrDemonizeOnLethalHit(player, target, ARDYN_EMPTY_HAND_DAMAGE, DEMONIZATION_STRENGTH);
+        }
     }
 
     private static Vec3d safeTeleportPos(ServerWorld world, Vec3d target, HitResult hitResult, ServerPlayerEntity player) {
@@ -748,6 +879,33 @@ public final class RoyalArmsWarpStrikeAbility {
         world.spawnParticles(ParticleTypes.SMOKE, player.getX(), player.getY() + 0.25D, player.getZ(), 8, 0.25D, 0.08D, 0.25D, 0.01D);
     }
 
+    private static void spawnArdynEmptyHandCharge(ServerWorld world, ServerPlayerEntity player, int chargeTicks) {
+        Vec3d look = player.getRotationVec(1.0F).normalize();
+        Vec3d right = new Vec3d(-look.z, 0.0D, look.x);
+        Vec3d fistPos = player.getPos()
+                .add(0.0D, 0.95D, 0.0D)
+                .add(look.multiply(0.34D))
+                .add(right.multiply(0.30D));
+        double pull = 1.0D - chargeTicks / (double) ARDYN_EMPTY_HAND_CHARGE_TICKS;
+        world.spawnParticles(ARDYN_IMPACT_PARTICLE, fistPos.x, fistPos.y, fistPos.z, 8, 0.07D, 0.07D, 0.07D, 0.006D + pull * 0.012D);
+        world.spawnParticles(ParticleTypes.SMOKE, fistPos.x, fistPos.y, fistPos.z, 5, 0.05D, 0.05D, 0.05D, 0.006D);
+        if (world.random.nextFloat() < 0.55F) {
+            world.spawnParticles(ParticleTypes.SOUL_FIRE_FLAME, fistPos.x, fistPos.y, fistPos.z, 1, 0.03D, 0.03D, 0.03D, 0.0D);
+        }
+    }
+
+    private static void spawnArdynEmptyHandDashImpact(ServerWorld world, Vec3d pos, Vec3d look) {
+        Vec3d center = pos.add(0.0D, 0.9D, 0.0D);
+        for (int i = 0; i < 12; i++) {
+            Vec3d trailPos = center.subtract(look.multiply(i * 0.18D));
+            world.spawnParticles(ARDYN_TRAIL_PARTICLE, trailPos.x, trailPos.y, trailPos.z, 2, 0.10D, 0.18D, 0.10D, 0.015D);
+            if (i % 2 == 0) {
+                world.spawnParticles(ParticleTypes.SMOKE, trailPos.x, trailPos.y - 0.15D, trailPos.z, 2, 0.10D, 0.08D, 0.10D, 0.008D);
+            }
+        }
+        world.spawnParticles(ARDYN_IMPACT_PARTICLE, center.x, center.y - 0.25D, center.z, 20, 0.28D, 0.24D, 0.28D, 0.025D);
+    }
+
     private static void spawnArdynImpactSphere(ServerWorld world, Vec3d center) {
         int rings = 5;
         int pointsPerRing = 24;
@@ -836,6 +994,22 @@ public final class RoyalArmsWarpStrikeAbility {
                 return ItemStack.EMPTY;
             }
             return stacks.get(Math.floorMod(shotIndex, stacks.size()));
+        }
+    }
+
+    private static final class ActiveArdynEmptyHandDash {
+        private final UUID ownerUuid;
+        private final ServerWorld world;
+        private final Vec3d from;
+        private final Vec3d to;
+        private int chargeTicks;
+
+        private ActiveArdynEmptyHandDash(UUID ownerUuid, ServerWorld world, Vec3d from, Vec3d to, int chargeTicks) {
+            this.ownerUuid = ownerUuid;
+            this.world = world;
+            this.from = from;
+            this.to = to;
+            this.chargeTicks = chargeTicks;
         }
     }
 

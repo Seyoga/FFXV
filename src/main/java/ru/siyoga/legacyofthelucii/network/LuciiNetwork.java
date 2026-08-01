@@ -37,6 +37,7 @@ public final class LuciiNetwork {
     public static final Identifier ARDYN_SHADOW_STEP_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "ardyn_shadow_step");
     public static final Identifier ARDYN_SHADOW_STEP_VISUAL_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "ardyn_shadow_step_visual");
     public static final Identifier ROYAL_ARMS_WALL_ANIMATION_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "royal_arms_wall_animation");
+    public static final Identifier DEBUG_DEMONIZE_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "debug_demonize");
 
     private LuciiNetwork() {
     }
@@ -124,9 +125,13 @@ public final class LuciiNetwork {
     }
 
     public static void broadcastArdynShadowStep(ServerWorld world, ServerPlayerEntity owner, boolean active) {
+        broadcastArdynShadowStep(world, owner.getUuid(), active);
+    }
+
+    public static void broadcastArdynShadowStep(ServerWorld world, java.util.UUID ownerUuid, boolean active) {
         for (ServerPlayerEntity viewer : world.getPlayers()) {
             PacketByteBuf buf = PacketByteBufs.create();
-            buf.writeUuid(owner.getUuid());
+            buf.writeUuid(ownerUuid);
             buf.writeBoolean(active);
             ServerPlayNetworking.send(viewer, ARDYN_SHADOW_STEP_VISUAL_PACKET, buf);
         }

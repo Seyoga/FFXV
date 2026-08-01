@@ -99,6 +99,7 @@ public final class RoyalArmsAbility {
     private static Vec3d lastPlayerPos;
     private static Vec3d currentPlayerPos;
     private static int refreshTimer;
+    private static int lastSelectedSlot = -1;
     private static int lastTargetIndex = -1;
     private static FloatingItem targetedItem;
     private static int attackEquipCooldown;
@@ -107,6 +108,7 @@ public final class RoyalArmsAbility {
     private static float orbitTime;
     private static float previousItemSpinAngle;
     private static float itemSpinAngle;
+    private static boolean initialAuraAppearance;
     private static boolean wasSneaking;
     private static boolean orbitPausedByDoubleSneak;
     private static int sneakDoubleTapTicks;
@@ -167,6 +169,7 @@ public final class RoyalArmsAbility {
             if (active) {
                 clearAura();
                 rebuildAura(client);
+                initialAuraAppearance = true;
             } else {
                 startClosingAura();
                 if (client.player != null) {
@@ -194,14 +197,13 @@ public final class RoyalArmsAbility {
         updateOrbitSpeedState(client);
         previousOrbitTime = orbitTime;
         previousItemSpinAngle = itemSpinAngle;
-        boolean transitioning = hasTransitioningLocalItems();
         UUID localOwnerUuid = client.player.getUuid();
         float normalOrbitSpeed = currentOrbitSpeed(client);
         boolean explosionActive = explosionGuardOrbits.containsKey(localOwnerUuid);
         float orbitDelta = advanceLocalExplosionGuardOrbit(localOwnerUuid, normalOrbitSpeed);
         float layerMotion = maxGuardLayerMotion(localOwnerUuid);
 
-        if (!transitioning || explosionActive) {
+        if (!initialAuraAppearance || explosionActive) {
             orbitTime += orbitDelta;
         }
 
@@ -217,6 +219,12 @@ public final class RoyalArmsAbility {
 
         if (attackEquipCooldown > 0) {
             attackEquipCooldown--;
+        }
+
+        int selectedSlot = client.player.getInventory().selectedSlot;
+        if (selectedSlot != lastSelectedSlot) {
+            refreshTimer = 0;
+            rebuildAura(client);
         }
 
         refreshTimer++;
@@ -250,6 +258,10 @@ public final class RoyalArmsAbility {
             item.angle += diff * 0.18F;
             item.highlightScale = MathHelper.lerp(0.16F, item.highlightScale, item == targetedItem ? TARGET_ITEM_SCALE : 1.0F);
             item.spawnTicks = Math.min(APPEAR_TICKS, item.spawnTicks + 1);
+        }
+        if (initialAuraAppearance
+                && floatingItems.stream().noneMatch(FloatingItem::isAppearing)) {
+            initialAuraAppearance = false;
         }
 
         FloatingItem newTarget = findTargetedItem(client, time);
@@ -335,7 +347,7 @@ public final class RoyalArmsAbility {
         Vec3d cameraPos = context.camera().getPos();
         float tickDelta = client.isPaused() ? 0.0F : context.tickDelta();
         float time = MathHelper.lerp(tickDelta, previousOrbitTime, orbitTime);
-        float spinAngle = MathHelper.lerp(tickDelta, previousItemSpinAngle, itemSpinAngle);
+        float spinAngle = lerpAngleDegrees(previousItemSpinAngle, itemSpinAngle, tickDelta);
         float spinTime = client.world.getTime() + tickDelta;
         float localGuardProgress = MathHelper.lerp(
                 tickDelta,
@@ -525,6 +537,7 @@ public final class RoyalArmsAbility {
 
         List<FloatingItem> previous = new ArrayList<>(floatingItems);
         floatingItems.clear();
+        lastSelectedSlot = client.player.getInventory().selectedSlot;
 
         List<InventoryItem> inventoryItems = collectFilteredInventory(client);
         int total = inventoryItems.size();
@@ -818,15 +831,6 @@ public final class RoyalArmsAbility {
         return false;
     }
 
-    private static boolean hasTransitioningLocalItems() {
-        for (FloatingItem item : floatingItems) {
-            if (item.isTransitioning()) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     private static void updateLocalPlayerPosition(MinecraftClient client) {
         Vec3d playerPos = client.player.getPos();
         if (currentPlayerPos == null) {
@@ -898,10 +902,12 @@ public final class RoyalArmsAbility {
         lastTargetIndex = -1;
         lastPlayerPos = null;
         currentPlayerPos = null;
+        lastSelectedSlot = -1;
         previousOrbitTime = 0.0F;
         orbitTime = 0.0F;
         previousItemSpinAngle = 0.0F;
         itemSpinAngle = 0.0F;
+        initialAuraAppearance = false;
         wasSneaking = false;
         orbitPausedByDoubleSneak = false;
         sneakDoubleTapTicks = 0;
@@ -1034,33 +1040,26 @@ public final class RoyalArmsAbility {
         }
 
         float normalTravel = Math.max(0.0F, normalSpeed) * durationTicks;
-        float nearestReachable = Float.MAX_VALUE;
-        float nearestNextRevolution = Float.MAX_VALUE;
+        float selectedForwardTravel = Float.MAX_VALUE;
 
         for (float itemAngle : itemAngles) {
             float forwardTravel = guardForwardDegrees(itemAngle, targetAngle);
 
-            // The ring is never allowed to rotate backwards. If an item has already
-            // passed the useful interception window, the next item ahead is selected.
-            if (forwardTravel + 0.001F >= normalTravel) {
-                nearestReachable = Math.min(nearestReachable, forwardTravel);
-            } else {
-                nearestNextRevolution = Math.min(
-                        nearestNextRevolution,
-                        forwardTravel + 360.0F
-                );
+            // Select the first weapon in the forward-moving chain that reaches the impact
+            // angle no earlier than the projectile. A weapon that would already have passed
+            // the angle is skipped in favor of the next one; the orbit never reverses.
+            while (forwardTravel + 0.001F < normalTravel) {
+                forwardTravel += 360.0F;
             }
+            selectedForwardTravel = Math.min(selectedForwardTravel, forwardTravel);
         }
 
-        float totalTravel = nearestReachable != Float.MAX_VALUE
-                ? nearestReachable
-                : nearestNextRevolution;
-        if (totalTravel == Float.MAX_VALUE) {
+        if (selectedForwardTravel == Float.MAX_VALUE) {
             guardLayerBoosts.remove(key);
             return;
         }
 
-        float extraTravel = Math.max(0.0F, totalTravel - normalTravel);
+        float extraTravel = Math.max(0.0F, selectedForwardTravel - normalTravel);
         if (extraTravel <= 0.001F) {
             guardLayerBoosts.remove(key);
             return;
@@ -1442,6 +1441,7 @@ public final class RoyalArmsAbility {
         MinecraftClient client = MinecraftClient.getInstance();
         UUID selfUuid = client.player == null ? null : client.player.getUuid();
         if (ownerUuid.equals(selfUuid)) {
+            initialAuraAppearance = true;
             for (FloatingItem item : floatingItems) {
                 item.spawnTicks = 0;
                 item.closing = false;
@@ -1670,8 +1670,8 @@ public final class RoyalArmsAbility {
             return easeOutCubic(interpolatedSpawnTicks(tickDelta) / (float) APPEAR_TICKS);
         }
 
-        private boolean isTransitioning() {
-            return closing || spawnTicks < APPEAR_TICKS;
+        private boolean isAppearing() {
+            return !closing && spawnTicks < APPEAR_TICKS;
         }
 
         private float interpolatedSpawnTicks(float tickDelta) {
