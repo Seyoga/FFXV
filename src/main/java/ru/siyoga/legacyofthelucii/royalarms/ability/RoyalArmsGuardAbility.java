@@ -53,7 +53,7 @@ public final class RoyalArmsGuardAbility {
     private static final float MAX_EXPLOSION_REDUCTION = 0.70F;
 
     private static final Set<UUID> ACTIVE_OWNERS = new HashSet<>();
-    private static final Map<OwnerLayerKey, UUID> PENDING_BY_LAYER = new HashMap<>();
+    private static final Map<OwnerLayerKey, Set<UUID>> PENDING_BY_LAYER = new HashMap<>();
     private static final Map<UUID, PendingBlock> PENDING_BLOCKS = new HashMap<>();
     private static final Map<UUID, Integer> UPKEEP_TIMERS = new HashMap<>();
     private static final Set<UUID> EXPLOSION_DAMAGE_REENTRY = new HashSet<>();
@@ -156,13 +156,14 @@ public final class RoyalArmsGuardAbility {
         threats.sort(Comparator.comparingDouble(Threat::timeToClosestApproach));
         for (Threat threat : threats) {
             PersistentProjectileEntity projectile = threat.projectile();
+            int layerItemCount = itemCountInLayer(itemCount, threat.layer());
             if (PENDING_BLOCKS.containsKey(projectile.getUuid())
-                    || itemCountInLayer(itemCount, threat.layer()) <= 0) {
+                    || layerItemCount <= 0) {
                 continue;
             }
 
             OwnerLayerKey layerKey = new OwnerLayerKey(player.getUuid(), threat.layer());
-            if (PENDING_BY_LAYER.containsKey(layerKey)) {
+            if (pendingCount(layerKey) >= layerItemCount) {
                 continue;
             }
 
@@ -339,6 +340,10 @@ public final class RoyalArmsGuardAbility {
             int layer
     ) {
         Vec3d incomingVelocity = projectile.getVelocity();
+        // Stop the projectile as soon as the server commits to the interception. Letting it
+        // keep moving during the weapon approach animation allowed fast arrows to hit first.
+        projectile.setNoGravity(true);
+        projectile.setVelocity(Vec3d.ZERO);
         PENDING_BLOCKS.put(
                 projectile.getUuid(),
                 new PendingBlock(
@@ -350,10 +355,7 @@ public final class RoyalArmsGuardAbility {
                         layer
                 )
         );
-        PENDING_BY_LAYER.put(
-                new OwnerLayerKey(player.getUuid(), layer),
-                projectile.getUuid()
-        );
+        trackPending(new OwnerLayerKey(player.getUuid(), layer), projectile.getUuid());
 
         RoyalArmsGuardNetwork.broadcastBlock(
                 (ServerWorld) player.getWorld(),
@@ -373,7 +375,7 @@ public final class RoyalArmsGuardAbility {
             OwnerLayerKey layerKey = new OwnerLayerKey(pending.ownerUuid, pending.layer);
 
             if (projectile.isRemoved()) {
-                PENDING_BY_LAYER.remove(layerKey, projectile.getUuid());
+                untrackPending(layerKey, projectile.getUuid());
                 iterator.remove();
                 continue;
             }
@@ -395,8 +397,29 @@ public final class RoyalArmsGuardAbility {
                 spawnImpact(world, pending.interceptPos, pending.incomingVelocity);
             }
 
-            PENDING_BY_LAYER.remove(layerKey, projectile.getUuid());
+            untrackPending(layerKey, projectile.getUuid());
             iterator.remove();
+        }
+    }
+
+    private static int pendingCount(OwnerLayerKey layerKey) {
+        Set<UUID> pending = PENDING_BY_LAYER.get(layerKey);
+        return pending == null ? 0 : pending.size();
+    }
+
+    private static void trackPending(OwnerLayerKey layerKey, UUID projectileUuid) {
+        PENDING_BY_LAYER.computeIfAbsent(layerKey, ignored -> new HashSet<>()).add(projectileUuid);
+    }
+
+    private static void untrackPending(OwnerLayerKey layerKey, UUID projectileUuid) {
+        Set<UUID> pending = PENDING_BY_LAYER.get(layerKey);
+        if (pending == null) {
+            return;
+        }
+
+        pending.remove(projectileUuid);
+        if (pending.isEmpty()) {
+            PENDING_BY_LAYER.remove(layerKey);
         }
     }
 
@@ -455,14 +478,21 @@ public final class RoyalArmsGuardAbility {
             return true;
         }
 
-        if (amount <= 0.0F
-                || !source.isIn(DamageTypeTags.IS_EXPLOSION)
-                || !ACTIVE_OWNERS.contains(ownerUuid)) {
+        if (amount <= 0.0F || !ACTIVE_OWNERS.contains(ownerUuid)) {
             return true;
         }
 
         LuciiPlayerState state = LuciiPlayerStates.get(player);
         if (state.legacy() != LuciiLegacy.NOCTIS || !state.royalArmsActive()) {
+            return true;
+        }
+
+        if (source.isIn(DamageTypeTags.IS_PROJECTILE)
+                && source.getSource() instanceof PersistentProjectileEntity projectile) {
+            return !emergencyBlockProjectile(player, state, projectile);
+        }
+
+        if (!source.isIn(DamageTypeTags.IS_EXPLOSION)) {
             return true;
         }
 
@@ -498,6 +528,63 @@ public final class RoyalArmsGuardAbility {
             EXPLOSION_DAMAGE_REENTRY.remove(ownerUuid);
         }
         return false;
+    }
+
+    private static boolean emergencyBlockProjectile(
+            ServerPlayerEntity player,
+            LuciiPlayerState state,
+            PersistentProjectileEntity projectile
+    ) {
+        int itemCount = RoyalArmsInventoryItems.collect(player).size();
+        if (itemCount <= 0 || !state.spendMana(INTERCEPT_MANA_COST)) {
+            return false;
+        }
+
+        Vec3d playerCenter = player.getBoundingBox().getCenter();
+        Vec3d radial = projectile.getPos().subtract(playerCenter).multiply(1.0D, 0.0D, 1.0D);
+        if (radial.lengthSquared() < 0.0001D) {
+            Vec3d velocity = projectile.getVelocity();
+            radial = new Vec3d(-velocity.x, 0.0D, -velocity.z);
+        }
+        if (radial.lengthSquared() < 0.0001D) {
+            radial = new Vec3d(0.0D, 0.0D, 1.0D);
+        }
+
+        int layer = layerForHeight(projectile.getY() - player.getY());
+        radial = radial.normalize().multiply(GUARD_ORBIT_RADIUS);
+        Vec3d interceptPos = new Vec3d(
+                playerCenter.x + radial.x,
+                player.getY() + layerYOffset(layer),
+                playerCenter.z + radial.z
+        );
+        Vec3d incomingVelocity = projectile.getVelocity();
+
+        PendingBlock pending = PENDING_BLOCKS.remove(projectile.getUuid());
+        if (pending != null) {
+            untrackPending(
+                    new OwnerLayerKey(pending.ownerUuid, pending.layer),
+                    projectile.getUuid()
+            );
+            incomingVelocity = pending.incomingVelocity;
+        }
+
+        projectile.setPosition(interceptPos.x, interceptPos.y, interceptPos.z);
+        projectile.setNoGravity(false);
+        projectile.setVelocity(0.0D, FALL_SPEED, 0.0D);
+
+        if (player.getWorld() instanceof ServerWorld world) {
+            RoyalArmsGuardNetwork.broadcastBlock(
+                    world,
+                    player,
+                    interceptPos,
+                    incomingVelocity,
+                    1,
+                    layer
+            );
+            spawnImpact(world, interceptPos, incomingVelocity);
+        }
+        LuciiNetwork.sendState(player);
+        return true;
     }
 
     private static void spawnExplosionGuardImpact(
@@ -555,19 +642,46 @@ public final class RoyalArmsGuardAbility {
         UUID ownerUuid = player.getUuid();
         ACTIVE_OWNERS.remove(ownerUuid);
         UPKEEP_TIMERS.remove(ownerUuid);
-        PENDING_BY_LAYER.keySet().removeIf(key -> key.ownerUuid.equals(ownerUuid));
-        PENDING_BLOCKS.entrySet().removeIf(
-                entry -> entry.getValue().ownerUuid.equals(ownerUuid)
-        );
+        releasePendingBlocks(ownerUuid);
         EXPLOSION_DAMAGE_REENTRY.remove(ownerUuid);
     }
 
     public static void clearAll(MinecraftServer server) {
         ACTIVE_OWNERS.clear();
+        for (PendingBlock pending : PENDING_BLOCKS.values()) {
+            releaseProjectile(pending);
+        }
         PENDING_BY_LAYER.clear();
         PENDING_BLOCKS.clear();
         UPKEEP_TIMERS.clear();
         EXPLOSION_DAMAGE_REENTRY.clear();
+    }
+
+    private static void releasePendingBlocks(UUID ownerUuid) {
+        Iterator<Map.Entry<UUID, PendingBlock>> iterator = PENDING_BLOCKS.entrySet().iterator();
+        while (iterator.hasNext()) {
+            PendingBlock pending = iterator.next().getValue();
+            if (!pending.ownerUuid.equals(ownerUuid)) {
+                continue;
+            }
+
+            releaseProjectile(pending);
+            untrackPending(
+                    new OwnerLayerKey(pending.ownerUuid, pending.layer),
+                    pending.projectile.getUuid()
+            );
+            iterator.remove();
+        }
+        PENDING_BY_LAYER.keySet().removeIf(key -> key.ownerUuid.equals(ownerUuid));
+    }
+
+    private static void releaseProjectile(PendingBlock pending) {
+        if (pending.projectile.isRemoved()) {
+            return;
+        }
+
+        pending.projectile.setNoGravity(false);
+        pending.projectile.setVelocity(pending.incomingVelocity);
     }
 
     private record OwnerLayerKey(UUID ownerUuid, int layer) {

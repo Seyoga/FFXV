@@ -19,11 +19,13 @@ public final class RoyalArmsWallClient {
     private static KeyBinding warpKey;
     private static KeyBinding bindKey;
     private static KeyBinding guardKey;
+    private static KeyBinding debugDemonizeKey;
     private static KeyBinding ardynShadowStepKey;
     private static boolean wallKeyWasDown;
     private static boolean warpKeyWasDown;
     private static boolean bindKeyWasDown;
     private static boolean guardKeyWasDown;
+    private static int debugDemonizeTicks;
     private static boolean shadowStepWasDown;
 
     private RoyalArmsWallClient() {
@@ -34,6 +36,7 @@ public final class RoyalArmsWallClient {
         warpKey = registerKey("key.legacyofthelucii.royal_arms.warp", GLFW.GLFW_KEY_2);
         bindKey = registerKey("key.legacyofthelucii.royal_arms.bind", GLFW.GLFW_KEY_3);
         guardKey = registerKey("key.legacyofthelucii.royal_arms.guard", GLFW.GLFW_KEY_4);
+        debugDemonizeKey = registerKey("key.legacyofthelucii.royal_arms.debug_demonize", GLFW.GLFW_KEY_5);
         ardynShadowStepKey = registerKey("key.legacyofthelucii.royal_arms.ardyn_shadow_step", GLFW.GLFW_KEY_Z);
         ClientTickEvents.END_CLIENT_TICK.register(RoyalArmsWallClient::tick);
     }
@@ -53,6 +56,7 @@ public final class RoyalArmsWallClient {
             warpKeyWasDown = false;
             bindKeyWasDown = false;
             guardKeyWasDown = false;
+            debugDemonizeTicks = 0;
             if (shadowStepWasDown) {
                 sendShadowStep(false);
                 shadowStepWasDown = false;
@@ -67,10 +71,12 @@ public final class RoyalArmsWallClient {
         boolean numberTwoDown = isPressed(warpKey);
         boolean numberThreeDown = isPressed(bindKey);
         boolean numberFourDown = isPressed(guardKey);
+        boolean numberFiveDown = isPressed(debugDemonizeKey);
         boolean wallKeyDown = controlDown && numberOneDown;
         boolean warpKeyDown = controlDown && numberTwoDown;
         boolean bindKeyDown = controlDown && numberThreeDown;
         boolean guardKeyDown = controlDown && numberFourDown;
+        boolean debugDemonizeDown = controlDown && numberFiveDown;
         boolean shadowStepDown = isPressed(ardynShadowStepKey);
 
         if (wallKeyDown && !wallKeyWasDown && ClientLuciiState.legacy() == LuciiLegacy.NOCTIS && ClientLuciiState.royalArmsActive()) {
@@ -97,6 +103,15 @@ public final class RoyalArmsWallClient {
             sendGuardToggle(!RoyalArmsGuardClient.isActive());
         } else if (!canGuard && RoyalArmsGuardClient.isActive()) {
             sendGuardToggle(false);
+        }
+
+        if (debugDemonizeDown) {
+            if (debugDemonizeTicks % 5 == 0) {
+                ClientPlayNetworking.send(LuciiNetwork.DEBUG_DEMONIZE_PACKET, PacketByteBufs.empty());
+            }
+            debugDemonizeTicks++;
+        } else {
+            debugDemonizeTicks = 0;
         }
 
         if (ClientLuciiState.legacy() == LuciiLegacy.ARDYN && ClientLuciiState.royalArmsActive() && shadowStepDown != shadowStepWasDown) {

@@ -20,6 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.siyoga.legacyofthelucii.block.LegacyBlocks;
 import ru.siyoga.legacyofthelucii.entity.LegacyEntities;
+import ru.siyoga.legacyofthelucii.effect.LegacyStatusEffects;
 import ru.siyoga.legacyofthelucii.item.LegacyItems;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerState;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerStates;
@@ -29,6 +30,7 @@ import ru.siyoga.legacyofthelucii.network.LuciiNetwork;
 import ru.siyoga.legacyofthelucii.network.RoyalArmsGuardNetwork;
 import ru.siyoga.legacyofthelucii.royalarms.ability.ArdynOverkillAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.ArdynShadowStepAbility;
+import ru.siyoga.legacyofthelucii.royalarms.ability.DebugDemonizeAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsBindAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsGuardAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsOrbitDamageAbility;
@@ -44,6 +46,7 @@ public final class LegacyOfTheLucii implements ModInitializer {
     public void onInitialize() {
         LegacyBlocks.register();
         LegacyEntities.register();
+        LegacyStatusEffects.register();
         LegacyItems.register();
         ServerPlayNetworking.registerGlobalReceiver(ROYAL_ARMS_EQUIP_PACKET, LegacyOfTheLucii::handleRoyalArmsEquip);
         ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.ROYAL_ARMS_TOGGLE_PACKET, LegacyOfTheLucii::handleRoyalArmsToggle);
@@ -52,6 +55,7 @@ public final class LegacyOfTheLucii implements ModInitializer {
         ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.ROYAL_ARMS_WARP_PACKET, LegacyOfTheLucii::handleRoyalArmsWarp);
         ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.ROYAL_ARMS_BIND_PACKET, LegacyOfTheLucii::handleRoyalArmsBind);
         ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.ARDYN_SHADOW_STEP_PACKET, LegacyOfTheLucii::handleArdynShadowStep);
+        ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.DEBUG_DEMONIZE_PACKET, LegacyOfTheLucii::handleDebugDemonize);
         ServerPlayNetworking.registerGlobalReceiver(RoyalArmsGuardNetwork.TOGGLE_PACKET, LegacyOfTheLucii::handleRoyalArmsGuard);
         ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
             if (entity instanceof ServerPlayerEntity player) {
@@ -260,6 +264,16 @@ public final class LegacyOfTheLucii implements ModInitializer {
     ) {
         boolean active = buf.readBoolean();
         server.execute(() -> RoyalArmsGuardAbility.setActive(player, active));
+    }
+
+    private static void handleDebugDemonize(
+            net.minecraft.server.MinecraftServer server,
+            ServerPlayerEntity player,
+            net.minecraft.server.network.ServerPlayNetworkHandler handler,
+            PacketByteBuf buf,
+            PacketSender responseSender
+    ) {
+        server.execute(() -> DebugDemonizeAbility.tryDemonize(player));
     }
 
     private static void handleRoyalArmsFilter(
