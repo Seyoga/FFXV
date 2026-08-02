@@ -140,11 +140,6 @@ public final class RoyalArmsAbility {
         }
 
         while (toggleKey.wasPressed()) {
-            if (!ClientLuciiState.royalArmsActive() && !ClientLuciiState.hasLegacy()) {
-                sendActionbar(client, Text.translatable("message.legacyofthelucii.royal_arms.requires_legacy").getString());
-                continue;
-            }
-
             if (toggleLockTicks > 0) {
                 continue;
             }

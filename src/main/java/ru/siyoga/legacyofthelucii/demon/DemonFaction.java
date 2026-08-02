@@ -5,8 +5,11 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.entity.mob.MobEntity;
+import net.minecraft.entity.mob.SlimeEntity;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.server.network.ServerPlayerEntity;
 import ru.siyoga.legacyofthelucii.LegacyOfTheLucii;
+import ru.siyoga.legacyofthelucii.demon.headgrab.DemonHeadgrabSystem;
 import ru.siyoga.legacyofthelucii.effect.Demonization;
 
 import java.util.UUID;
@@ -24,10 +27,29 @@ public final class DemonFaction {
         registered = true;
 
         ServerLivingEntityEvents.ALLOW_DAMAGE.register((victim, source, amount) -> {
+            if (victim instanceof SlimeEntity slime
+                    && DemonHeadgrabSystem.isDemonHeadgrabber(slime)) {
+                if (source.getAttacker()
+                        instanceof ServerPlayerEntity player) {
+                    DemonHeadgrabSystem.tryRescue(slime, player);
+                }
+                DemonHeadgrabSystem.onSlimeDamaged(slime);
+            }
+
             Entity attacker = source.getAttacker();
             if (!(attacker instanceof MobEntity demon)
                     || !Demonization.isDemonized(demon)) {
                 return true;
+            }
+
+            /*
+             * SlimeEntity applies its own contact damage outside the goal
+             * system. Headgrabber slimes must deal damage only through their
+             * dedicated grab state, never through that vanilla collision hit.
+             */
+            if (demon instanceof SlimeEntity slime
+                    && DemonHeadgrabSystem.isDemonHeadgrabber(slime)) {
+                return false;
             }
 
             // This also blocks explosion/projectile friendly fire when Minecraft

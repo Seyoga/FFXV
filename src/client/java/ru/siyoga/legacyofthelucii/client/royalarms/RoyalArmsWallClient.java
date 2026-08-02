@@ -8,8 +8,6 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import org.lwjgl.glfw.GLFW;
-import ru.siyoga.legacyofthelucii.client.state.ClientLuciiState;
-import ru.siyoga.legacyofthelucii.legacy.LuciiLegacy;
 import ru.siyoga.legacyofthelucii.network.LuciiNetwork;
 import ru.siyoga.legacyofthelucii.network.RoyalArmsGuardNetwork;
 
@@ -79,30 +77,20 @@ public final class RoyalArmsWallClient {
         boolean debugDemonizeDown = controlDown && numberFiveDown;
         boolean shadowStepDown = isPressed(ardynShadowStepKey);
 
-        if (wallKeyDown && !wallKeyWasDown && ClientLuciiState.legacy() == LuciiLegacy.NOCTIS && ClientLuciiState.royalArmsActive()) {
+        if (wallKeyDown && !wallKeyWasDown) {
             ClientPlayNetworking.send(LuciiNetwork.ROYAL_ARMS_WALL_PACKET, PacketByteBufs.empty());
         }
 
-        boolean canWarp = (ClientLuciiState.legacy() == LuciiLegacy.NOCTIS || ClientLuciiState.legacy() == LuciiLegacy.ARDYN)
-                && ClientLuciiState.royalArmsActive();
-        if (warpKeyDown && !warpKeyWasDown && canWarp) {
+        if (warpKeyDown && !warpKeyWasDown) {
             ClientPlayNetworking.send(LuciiNetwork.ROYAL_ARMS_WARP_PACKET, PacketByteBufs.empty());
         }
 
-        boolean canBind = (ClientLuciiState.legacy() == LuciiLegacy.NOCTIS || ClientLuciiState.legacy() == LuciiLegacy.ARDYN)
-                && ClientLuciiState.royalArmsActive();
-        if (canBind && bindKeyDown && !bindKeyWasDown) {
+        if (bindKeyDown && !bindKeyWasDown) {
             sendBindToggle();
-        } else if (!canBind && bindKeyWasDown) {
-            bindKeyDown = false;
         }
 
-        boolean canGuard = ClientLuciiState.legacy() == LuciiLegacy.NOCTIS
-                && ClientLuciiState.royalArmsActive();
-        if (canGuard && guardKeyDown && !guardKeyWasDown) {
+        if (guardKeyDown && !guardKeyWasDown) {
             sendGuardToggle(!RoyalArmsGuardClient.isActive());
-        } else if (!canGuard && RoyalArmsGuardClient.isActive()) {
-            sendGuardToggle(false);
         }
 
         if (debugDemonizeDown) {
@@ -114,11 +102,8 @@ public final class RoyalArmsWallClient {
             debugDemonizeTicks = 0;
         }
 
-        if (ClientLuciiState.legacy() == LuciiLegacy.ARDYN && ClientLuciiState.royalArmsActive() && shadowStepDown != shadowStepWasDown) {
+        if (shadowStepDown != shadowStepWasDown) {
             sendShadowStep(shadowStepDown);
-        } else if ((ClientLuciiState.legacy() != LuciiLegacy.ARDYN || !ClientLuciiState.royalArmsActive()) && shadowStepWasDown) {
-            sendShadowStep(false);
-            shadowStepDown = false;
         }
 
         wallKeyWasDown = wallKeyDown;

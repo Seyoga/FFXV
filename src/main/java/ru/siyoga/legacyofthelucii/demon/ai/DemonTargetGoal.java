@@ -3,11 +3,14 @@ package ru.siyoga.legacyofthelucii.demon.ai;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.ai.goal.ActiveTargetGoal;
 import net.minecraft.entity.mob.MobEntity;
+import net.minecraft.entity.mob.SlimeEntity;
 import net.minecraft.util.math.Box;
 import ru.siyoga.legacyofthelucii.demon.DemonFaction;
+import ru.siyoga.legacyofthelucii.demon.headgrab.DemonHeadgrabSystem;
 import ru.siyoga.legacyofthelucii.effect.Demonization;
 
-public final class DemonTargetGoal extends ActiveTargetGoal<LivingEntity> {
+public final class DemonTargetGoal
+        extends ActiveTargetGoal<LivingEntity> {
     private static final double HORIZONTAL_RANGE = 24.0D;
     private static final double VERTICAL_RANGE = 12.0D;
 
@@ -22,18 +25,23 @@ public final class DemonTargetGoal extends ActiveTargetGoal<LivingEntity> {
                 false,
                 target -> DemonFaction.canAttack(demon, target)
         );
+
         this.demon = demon;
     }
 
     @Override
     public boolean canStart() {
-        return Demonization.isDemonized(demon) && super.canStart();
+        return !isHeadgrabber()
+                && Demonization.isDemonized(demon)
+                && super.canStart();
     }
 
     @Override
     public boolean shouldContinue() {
         LivingEntity target = demon.getTarget();
-        return Demonization.isDemonized(demon)
+
+        return !isHeadgrabber()
+                && Demonization.isDemonized(demon)
                 && target != null
                 && DemonFaction.canAttack(demon, target)
                 && super.shouldContinue();
@@ -46,5 +54,10 @@ public final class DemonTargetGoal extends ActiveTargetGoal<LivingEntity> {
                 VERTICAL_RANGE,
                 HORIZONTAL_RANGE
         );
+    }
+
+    private boolean isHeadgrabber() {
+        return demon instanceof SlimeEntity slime
+                && DemonHeadgrabSystem.isDemonHeadgrabber(slime);
     }
 }

@@ -4,10 +4,12 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import ru.siyoga.legacyofthelucii.LegacyOfTheLucii;
+import ru.siyoga.legacyofthelucii.client.demon.DemonHeadgrabClient;
 import ru.siyoga.legacyofthelucii.client.state.DemonizationClientState;
 import ru.siyoga.legacyofthelucii.network.DemonizationNetwork;
 
-public final class DemonizationClientInitializer implements ClientModInitializer {
+public final class DemonizationClientInitializer
+        implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         ClientPlayNetworking.registerGlobalReceiver(
@@ -17,7 +19,11 @@ public final class DemonizationClientInitializer implements ClientModInitializer
                     boolean demonized = buf.readBoolean();
 
                     client.execute(() -> {
-                        DemonizationClientState.update(entityUuid, demonized);
+                        DemonizationClientState.update(
+                                entityUuid,
+                                demonized
+                        );
+
                         LegacyOfTheLucii.LOGGER.info(
                                 "Demonization client: state={} for entity uuid={}",
                                 demonized,
@@ -27,12 +33,17 @@ public final class DemonizationClientInitializer implements ClientModInitializer
                 }
         );
 
+        DemonHeadgrabClient.register();
+
         ClientPlayConnectionEvents.DISCONNECT.register(
-                (handler, client) -> DemonizationClientState.clear()
+                (handler, client) -> {
+                    DemonizationClientState.clear();
+                    DemonHeadgrabClient.reset();
+                }
         );
 
         LegacyOfTheLucii.LOGGER.info(
-                "Demonization client: explicit state receiver registered; glow disabled."
+                "Demonization client: state receiver and headgrab QTE registered."
         );
     }
 }

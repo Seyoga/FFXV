@@ -5,8 +5,10 @@ import net.minecraft.entity.ai.goal.Goal;
 import net.minecraft.entity.attribute.EntityAttributeInstance;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.mob.MobEntity;
+import net.minecraft.entity.mob.SlimeEntity;
 import net.minecraft.util.Hand;
 import ru.siyoga.legacyofthelucii.demon.DemonFaction;
+import ru.siyoga.legacyofthelucii.demon.headgrab.DemonHeadgrabSystem;
 import ru.siyoga.legacyofthelucii.effect.Demonization;
 
 import java.util.EnumSet;
@@ -48,7 +50,8 @@ public final class DemonMeleeAttackGoal extends Goal {
         demon.getNavigation().stop();
 
         LivingEntity target = demon.getTarget();
-        if (target != null && !DemonFaction.canAttack(demon, target)) {
+        if (target != null
+                && !DemonFaction.canAttack(demon, target)) {
             demon.setTarget(null);
         }
     }
@@ -61,7 +64,8 @@ public final class DemonMeleeAttackGoal extends Goal {
     @Override
     public void tick() {
         LivingEntity target = demon.getTarget();
-        if (target == null || !DemonFaction.canAttack(demon, target)) {
+        if (target == null
+                || !DemonFaction.canAttack(demon, target)) {
             demon.setTarget(null);
             return;
         }
@@ -70,16 +74,27 @@ public final class DemonMeleeAttackGoal extends Goal {
             attackCooldown--;
         }
 
-        demon.getLookControl().lookAt(target, 30.0F, 30.0F);
+        demon.getLookControl().lookAt(
+                target,
+                30.0F,
+                30.0F
+        );
 
         if (--pathUpdateCooldown <= 0) {
-            pathUpdateCooldown = 5 + demon.getRandom().nextInt(5);
-            demon.getNavigation().startMovingTo(target, MOVEMENT_SPEED);
+            pathUpdateCooldown =
+                    5 + demon.getRandom().nextInt(5);
+
+            demon.getNavigation().startMovingTo(
+                    target,
+                    MOVEMENT_SPEED
+            );
         }
 
-        if (demon.isInAttackRange(target) && attackCooldown <= 0) {
+        if (demon.isInAttackRange(target)
+                && attackCooldown <= 0) {
             attackCooldown = ATTACK_INTERVAL_TICKS;
             demon.swingHand(Hand.MAIN_HAND);
+
             target.damage(
                     demon.getDamageSources().mobAttack(demon),
                     getAttackDamage()
@@ -88,6 +103,12 @@ public final class DemonMeleeAttackGoal extends Goal {
     }
 
     private boolean hasValidTarget() {
+        /* Headgrabber slimes use their dedicated grab goal, not melee AI. */
+        if (demon instanceof SlimeEntity slime
+                && DemonHeadgrabSystem.isDemonHeadgrabber(slime)) {
+            return false;
+        }
+
         if (!Demonization.isDemonized(demon)
                 || !demon.isAlive()
                 || demon.isRemoved()
@@ -96,12 +117,15 @@ public final class DemonMeleeAttackGoal extends Goal {
         }
 
         LivingEntity target = demon.getTarget();
-        return target != null && DemonFaction.canAttack(demon, target);
+        return target != null
+                && DemonFaction.canAttack(demon, target);
     }
 
     private float getAttackDamage() {
         EntityAttributeInstance attackDamage =
-                demon.getAttributeInstance(EntityAttributes.GENERIC_ATTACK_DAMAGE);
+                demon.getAttributeInstance(
+                        EntityAttributes.GENERIC_ATTACK_DAMAGE
+                );
 
         if (attackDamage == null) {
             return MINIMUM_ATTACK_DAMAGE;
