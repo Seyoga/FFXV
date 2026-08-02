@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "ru.siyoga.legacyofthelucii.mixin.demonization",
+  "compatibilityLevel": "JAVA_17",
+  "mixins": [
+    "MobEntityDemonFactionMixin",
+    "SlimeEntityDemonSplitMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

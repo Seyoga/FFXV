@@ -28,6 +28,7 @@ import ru.siyoga.legacyofthelucii.legacy.RoyalArmsInventoryFilter;
 import ru.siyoga.legacyofthelucii.network.ArdynOverkillNetwork;
 import ru.siyoga.legacyofthelucii.network.LuciiNetwork;
 import ru.siyoga.legacyofthelucii.network.RoyalArmsGuardNetwork;
+import ru.siyoga.legacyofthelucii.particle.LegacyParticles;
 import ru.siyoga.legacyofthelucii.royalarms.ability.ArdynOverkillAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.ArdynShadowStepAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.DebugDemonizeAbility;
@@ -47,6 +48,7 @@ public final class LegacyOfTheLucii implements ModInitializer {
         LegacyBlocks.register();
         LegacyEntities.register();
         LegacyStatusEffects.register();
+        LegacyParticles.register();
         LegacyItems.register();
         ServerPlayNetworking.registerGlobalReceiver(ROYAL_ARMS_EQUIP_PACKET, LegacyOfTheLucii::handleRoyalArmsEquip);
         ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.ROYAL_ARMS_TOGGLE_PACKET, LegacyOfTheLucii::handleRoyalArmsToggle);

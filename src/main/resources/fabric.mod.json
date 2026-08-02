@@ -12,14 +12,18 @@
   "environment": "*",
   "entrypoints": {
     "main": [
-      "ru.siyoga.legacyofthelucii.LegacyOfTheLucii"
+      "ru.siyoga.legacyofthelucii.LegacyOfTheLucii",
+      "ru.siyoga.legacyofthelucii.DemonizationNetworkingInitializer"
     ],
     "client": [
-      "ru.siyoga.legacyofthelucii.client.LegacyOfTheLuciiClient"
+      "ru.siyoga.legacyofthelucii.client.LegacyOfTheLuciiClient",
+      "ru.siyoga.legacyofthelucii.client.DemonizationClientInitializer"
     ]
   },
   "mixins": [
-    "legacyofthelucii.mixins.json"
+    "legacyofthelucii.mixins.json",
+    "legacyofthelucii_demonization.mixins.json",
+    "legacyofthelucii_demon_faction.mixins.json"
   ],
   "depends": {
     "fabricloader": ">=${loader_version}",

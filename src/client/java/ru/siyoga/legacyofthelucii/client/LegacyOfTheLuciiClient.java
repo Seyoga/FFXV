@@ -14,6 +14,7 @@ import ru.siyoga.legacyofthelucii.block.LegacyBlocks;
 import ru.siyoga.legacyofthelucii.client.config.LegacyClientConfig;
 import ru.siyoga.legacyofthelucii.client.gui.skilltree.SkillTreeKeybindings;
 import ru.siyoga.legacyofthelucii.client.hud.LuciiHudOverlay;
+import ru.siyoga.legacyofthelucii.client.particle.DemonizedSlimeBallParticle;
 import ru.siyoga.legacyofthelucii.client.royalarms.RoyalArmsAbility;
 import ru.siyoga.legacyofthelucii.client.royalarms.RoyalArmsGuardClient;
 import ru.siyoga.legacyofthelucii.client.royalarms.RoyalArmsWallClient;
@@ -198,6 +199,7 @@ public final class LegacyOfTheLuciiClient implements ClientModInitializer {
         ArdynShadowStepClient.register();
         RoyalArmsBindClient.register();
         DemonizationFeatureRenderer.register();
+        DemonizedSlimeBallParticle.register();
         SkillTreeKeybindings.register();
         EntityRendererRegistry.register(LegacyEntities.ARDYN_BARRAGE_WEAPON, ArdynBarrageWeaponRenderer::new);
         BlockEntityRendererFactories.register(LegacyBlocks.ROYAL_ARMS_WALL_BLOCK_ENTITY, RoyalArmsWallBlockEntityRenderer::new);

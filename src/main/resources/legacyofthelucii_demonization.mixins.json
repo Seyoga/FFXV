@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "ru.siyoga.legacyofthelucii.client.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "client": [
+    "DemonizationBaseTintMixin",
+    "DemonizedSlimeTextureMixin",
+    "DemonizedSlimeParticleMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
