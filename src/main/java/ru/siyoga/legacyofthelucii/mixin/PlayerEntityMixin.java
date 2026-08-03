@@ -14,6 +14,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import ru.siyoga.legacyofthelucii.LegacyOfTheLucii;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerState;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerStateAccess;
+import ru.siyoga.legacyofthelucii.royalarms.ability.ArdynPointWarpAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.ArdynShadowStepAbility;
 
 @Mixin(PlayerEntity.class)
@@ -41,17 +42,26 @@ public abstract class PlayerEntityMixin implements LuciiPlayerStateAccess {
     }
 
     @Inject(method = "playStepSound", at = @At("HEAD"), cancellable = true)
-    private void legacyOfTheLucii$muteShadowStepFootsteps(BlockPos pos, BlockState state, CallbackInfo ci) {
+    private void legacyOfTheLucii$muteWarpFootsteps(BlockPos pos, BlockState state, CallbackInfo ci) {
         PlayerEntity player = (PlayerEntity) (Object) this;
-        if (!player.getWorld().isClient && ArdynShadowStepAbility.isActive(player.getUuid())) {
+        if (!player.getWorld().isClient
+                && (ArdynShadowStepAbility.isActive(player.getUuid())
+                || ArdynPointWarpAbility.isActive(player.getUuid()))) {
             ci.cancel();
         }
     }
 
     @Inject(method = "handleFallDamage", at = @At("HEAD"), cancellable = true)
-    private void legacyOfTheLucii$preventShadowStepFallDamage(float fallDistance, float damageMultiplier, DamageSource damageSource, CallbackInfoReturnable<Boolean> cir) {
+    private void legacyOfTheLucii$preventWarpFallDamage(
+            float fallDistance,
+            float damageMultiplier,
+            DamageSource damageSource,
+            CallbackInfoReturnable<Boolean> cir
+    ) {
         PlayerEntity player = (PlayerEntity) (Object) this;
-        if (!player.getWorld().isClient && ArdynShadowStepAbility.hasFallProtection(player.getUuid())) {
+        if (!player.getWorld().isClient
+                && (ArdynShadowStepAbility.hasFallProtection(player.getUuid())
+                || ArdynPointWarpAbility.hasFallProtection(player.getUuid()))) {
             player.fallDistance = 0.0F;
             cir.setReturnValue(false);
         }

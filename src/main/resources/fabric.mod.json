@@ -13,11 +13,13 @@
   "entrypoints": {
     "main": [
       "ru.siyoga.legacyofthelucii.LegacyOfTheLucii",
-      "ru.siyoga.legacyofthelucii.DemonizationNetworkingInitializer"
+      "ru.siyoga.legacyofthelucii.DemonizationNetworkingInitializer",
+      "ru.siyoga.legacyofthelucii.pointwarp.ArdynPointWarpInitializer"
     ],
     "client": [
       "ru.siyoga.legacyofthelucii.client.LegacyOfTheLuciiClient",
-      "ru.siyoga.legacyofthelucii.client.DemonizationClientInitializer"
+      "ru.siyoga.legacyofthelucii.client.DemonizationClientInitializer",
+      "ru.siyoga.legacyofthelucii.client.pointwarp.ArdynPointWarpClientInitializer"
     ]
   },
   "mixins": [

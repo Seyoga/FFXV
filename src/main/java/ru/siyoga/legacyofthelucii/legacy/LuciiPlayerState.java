@@ -1,7 +1,6 @@
 package ru.siyoga.legacyofthelucii.legacy;
 
 import net.minecraft.nbt.NbtCompound;
-
 public final class LuciiPlayerState {
     private static final int DEFAULT_MAX_MANA = 100;
     private static final int DEFAULT_MANA_REGEN_INTERVAL = 20;
@@ -19,7 +18,6 @@ public final class LuciiPlayerState {
     private static final String REGEN_TIMER_KEY = "ManaRegenTimer";
     private static final String MANA_REGEN_DELAY_KEY = "ManaRegenDelay";
     private static final int MAX_ARDYN_WARP_CHARGES = 12;
-
     private int mana = DEFAULT_MAX_MANA;
     private int maxMana = DEFAULT_MAX_MANA;
     private int level = 1;
@@ -35,7 +33,6 @@ public final class LuciiPlayerState {
     public int mana() {
         return mana;
     }
-
     public int maxMana() {
         return maxMana;
     }
@@ -60,7 +57,6 @@ public final class LuciiPlayerState {
         if (this.legacy != legacy) {
             royalArmsActive = false;
         }
-
         this.legacy = legacy;
         this.mana = Math.max(mana, maxMana / 2);
     }
@@ -80,7 +76,6 @@ public final class LuciiPlayerState {
     public RoyalArmsInventoryFilter royalArmsFilter() {
         return royalArmsFilter;
     }
-
     public int ardynWarpCharges() {
         return ardynWarpCharges;
     }
@@ -101,7 +96,6 @@ public final class LuciiPlayerState {
     public boolean ardynOverkillActive() {
         return ardynOverkillActive;
     }
-
     public boolean beginArdynOverkill() {
         if (legacy != LuciiLegacy.ARDYN || ardynOverkillActive) {
             return false;
@@ -119,7 +113,6 @@ public final class LuciiPlayerState {
         regenTimer = 0;
         manaRegenDelay = 0;
     }
-
     public void setRoyalArmsFilter(RoyalArmsInventoryFilter filter) {
         royalArmsFilter = filter == null ? RoyalArmsInventoryFilter.ALL : filter;
     }
@@ -133,7 +126,6 @@ public final class LuciiPlayerState {
         if (ardynOverkillActive || mana < amount) {
             return false;
         }
-
         mana -= amount;
         manaRegenDelay = DEFAULT_MANA_REGEN_DELAY;
         regenTimer = 0;
@@ -154,7 +146,15 @@ public final class LuciiPlayerState {
         regenTimer = 0;
         return true;
     }
+    public boolean addMana(int amount) {
+        if (amount <= 0 || mana >= maxMana) {
+            return false;
+        }
 
+        int previousMana = mana;
+        mana = Math.min(maxMana, mana + amount);
+        return mana != previousMana;
+    }
     public void addExperience(int amount) {
         if (amount <= 0) {
             return;
@@ -168,7 +168,6 @@ public final class LuciiPlayerState {
             mana = maxMana;
         }
     }
-
     public void tick() {
         if (ardynOverkillActive) {
             regenTimer++;
@@ -185,7 +184,6 @@ public final class LuciiPlayerState {
             manaRegenDelay--;
             return;
         }
-
         regenTimer++;
         if (regenTimer < DEFAULT_MANA_REGEN_INTERVAL) {
             return;
@@ -196,7 +194,6 @@ public final class LuciiPlayerState {
             mana++;
         }
     }
-
     public void readNbt(NbtCompound nbt) {
         mana = nbt.contains(MANA_KEY) ? nbt.getInt(MANA_KEY) : DEFAULT_MAX_MANA;
         maxMana = nbt.contains(MAX_MANA_KEY) ? nbt.getInt(MAX_MANA_KEY) : DEFAULT_MAX_MANA;
@@ -212,7 +209,6 @@ public final class LuciiPlayerState {
         ardynOverkillActive = nbt.getBoolean(ARDYN_OVERKILL_ACTIVE_KEY)
                 && legacy == LuciiLegacy.ARDYN
                 && mana < maxMana;
-
         if (ardynOverkillActive) {
             // Preserve the exact online recovery position, but never advance it while offline.
             // The interval is clamped so old/corrupt NBT cannot instantly refill mana on login.
@@ -220,7 +216,6 @@ public final class LuciiPlayerState {
             manaRegenDelay = 0;
         }
     }
-
     public void writeNbt(NbtCompound nbt) {
         nbt.putInt(MANA_KEY, mana);
         nbt.putInt(MAX_MANA_KEY, maxMana);
@@ -234,7 +229,6 @@ public final class LuciiPlayerState {
         nbt.putInt(REGEN_TIMER_KEY, regenTimer);
         nbt.putInt(MANA_REGEN_DELAY_KEY, manaRegenDelay);
     }
-
     private int experienceForNextLevel() {
         return 50 + (level - 1) * 25;
     }

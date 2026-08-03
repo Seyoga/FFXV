@@ -37,6 +37,15 @@ public final class ArdynShadowStepClient {
     }
 
     public static void update(UUID ownerUuid, boolean active) {
+        update(ownerUuid, active, true);
+    }
+
+    /**
+     * Updates the shared Shadow Step visual state.
+     * Point Warp passes screenOverlay=false, preserving the hidden model and
+     * silhouette while leaving the screen colors untouched.
+     */
+    public static void update(UUID ownerUuid, boolean active, boolean screenOverlay) {
         MinecraftClient client = MinecraftClient.getInstance();
         long now = client.world == null ? 0L : client.world.getTime();
         VisualState state = VISUALS.computeIfAbsent(ownerUuid, uuid -> new VisualState());
@@ -44,6 +53,7 @@ public final class ArdynShadowStepClient {
         state.lastUpdateTick = now;
         if (active) {
             state.activeStartTick = now;
+            state.screenOverlay = screenOverlay;
         }
         if (!active) {
             state.fadeUntilTick = now + SILHOUETTE_TICKS;
@@ -66,7 +76,6 @@ public final class ArdynShadowStepClient {
         if (client.world == null || context.matrixStack() == null || context.consumers() == null) {
             return;
         }
-
         long now = client.world.getTime();
         Vec3d cameraPos = context.camera().getPos();
         EntityRenderDispatcher dispatcher = client.getEntityRenderDispatcher();
@@ -79,17 +88,25 @@ public final class ArdynShadowStepClient {
                 iterator.remove();
                 continue;
             }
-
             if (!state.active && now > state.fadeUntilTick) {
                 iterator.remove();
                 continue;
             }
-
             if (state.active) {
                 float activeAge = now + context.tickDelta() - state.activeStartTick;
                 if (activeAge <= START_SILHOUETTE_TICKS) {
                     float fade = 1.0F - MathHelper.clamp(activeAge / START_SILHOUETTE_TICKS, 0.0F, 1.0F);
-                    renderSilhouette(dispatcher, player, context.matrixStack(), context.consumers(), cameraPos, player.getLerpedPos(context.tickDelta()), player.getYaw(context.tickDelta()), 0.72F * fade, context.tickDelta());
+                    renderSilhouette(
+                            dispatcher,
+                            player,
+                            context.matrixStack(),
+                            context.consumers(),
+                            cameraPos,
+                            player.getLerpedPos(context.tickDelta()),
+                            player.getYaw(context.tickDelta()),
+                            0.72F * fade,
+                            context.tickDelta()
+                    );
                 }
             }
         }
@@ -97,7 +114,11 @@ public final class ArdynShadowStepClient {
 
     private static void renderOverlay(DrawContext context, float tickDelta) {
         MinecraftClient client = MinecraftClient.getInstance();
-        if (client.player == null || !shouldHidePlayer(client.player.getUuid())) {
+        VisualState state = client.player == null ? null : VISUALS.get(client.player.getUuid());
+        if (client.player == null
+                || state == null
+                || !state.screenOverlay
+                || !shouldHidePlayer(client.player.getUuid())) {
             return;
         }
 
@@ -138,7 +159,6 @@ public final class ArdynShadowStepClient {
         if (client.world == null) {
             return null;
         }
-
         for (PlayerEntity player : client.world.getPlayers()) {
             if (player.getUuid().equals(ownerUuid)) {
                 return player;
@@ -235,8 +255,38 @@ public final class ArdynShadowStepClient {
         }
 
         @Override
-        public void vertex(float x, float y, float z, float red, float green, float blue, float alpha, float u, float v, int overlay, int light, float normalX, float normalY, float normalZ) {
-            delegate.vertex(x, y, z, red * 0.03F, green * 0.015F, blue * 0.02F, alpha * this.alpha, u, v, overlay, light, normalX, normalY, normalZ);
+        public void vertex(
+                float x,
+                float y,
+                float z,
+                float red,
+                float green,
+                float blue,
+                float alpha,
+                float u,
+                float v,
+                int overlay,
+                int light,
+                float normalX,
+                float normalY,
+                float normalZ
+        ) {
+            delegate.vertex(
+                    x,
+                    y,
+                    z,
+                    red * 0.03F,
+                    green * 0.015F,
+                    blue * 0.02F,
+                    alpha * this.alpha,
+                    u,
+                    v,
+                    overlay,
+                    light,
+                    normalX,
+                    normalY,
+                    normalZ
+            );
         }
     }
 
@@ -245,5 +295,6 @@ public final class ArdynShadowStepClient {
         private long lastUpdateTick;
         private long fadeUntilTick;
         private long activeStartTick;
+        private boolean screenOverlay;
     }
 }
