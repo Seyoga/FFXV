@@ -9,7 +9,7 @@ import org.lwjgl.glfw.GLFW;
 import ru.siyoga.legacyofthelucii.LegacyOfTheLucii;
 import ru.siyoga.legacyofthelucii.network.LuciiNetwork;
 
-/** Restores the Ctrl+5 development shortcut that sends the existing server debug packet. */
+/** Restores the Ctrl+7 development shortcut that sends the existing server debug packet. */
 public final class DemonizationDebugClient {
     private static boolean registered;
     private static boolean wasPressed;
@@ -34,16 +34,16 @@ public final class DemonizationDebugClient {
         long window = client.getWindow().getHandle();
         boolean controlDown = InputUtil.isKeyPressed(window, GLFW.GLFW_KEY_LEFT_CONTROL)
                 || InputUtil.isKeyPressed(window, GLFW.GLFW_KEY_RIGHT_CONTROL);
-        boolean fiveDown = InputUtil.isKeyPressed(window, GLFW.GLFW_KEY_5)
-                || InputUtil.isKeyPressed(window, GLFW.GLFW_KEY_KP_5);
-        boolean pressed = controlDown && fiveDown;
+        boolean sevenDown = InputUtil.isKeyPressed(window, GLFW.GLFW_KEY_7)
+                || InputUtil.isKeyPressed(window, GLFW.GLFW_KEY_KP_7);
+        boolean pressed = controlDown && sevenDown;
 
         if (pressed
                 && !wasPressed
                 && client.currentScreen == null
                 && client.player != null
                 && client.getNetworkHandler() != null) {
-            LegacyOfTheLucii.LOGGER.info("Demonization debug: Ctrl+5 packet sent by client.");
+            LegacyOfTheLucii.LOGGER.info("Demonization debug: Ctrl+7 packet sent by client.");
             ClientPlayNetworking.send(LuciiNetwork.DEBUG_DEMONIZE_PACKET, PacketByteBufs.create());
         }
 

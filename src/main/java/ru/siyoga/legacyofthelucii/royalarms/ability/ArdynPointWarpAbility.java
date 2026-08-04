@@ -34,9 +34,9 @@ import java.util.UUID;
 public final class ArdynPointWarpAbility {
     private static final String LOG = "[PointWarp/SERVER]";
     public static final double MAX_RANGE = 48.0D;
-    public static final double BLOCKS_PER_SECOND = 17.5D;
+    public static final double BLOCKS_PER_SECOND = ArdynMovementTuning.PHASE_SPEED_BLOCKS_PER_SECOND;
 
-    private static final double SPEED_PER_TICK = BLOCKS_PER_SECOND / 20.0D;
+    private static final double SPEED_PER_TICK = ArdynMovementTuning.PHASE_SPEED_PER_TICK;
     private static final double CORNER_INSET = 0.055D;
     private static final double MARKER_Y_OFFSET = 0.035D;
     private static final double FLIGHT_Y_OFFSET = 0.42D;

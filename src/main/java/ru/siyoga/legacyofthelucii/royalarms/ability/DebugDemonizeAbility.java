@@ -17,7 +17,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
-/** Ctrl+5 development helper. Prefer a fresh mob so an old demon does not steal the test. */
+/** Ctrl+7 development helper. Prefer a fresh mob so an old demon does not steal the test. */
 public final class DebugDemonizeAbility {
     private static final double RAY_DISTANCE = 12.0D;
     private static final double RAY_WIDTH = 1.25D;
@@ -45,9 +45,9 @@ public final class DebugDemonizeAbility {
                 : candidates.stream().findFirst();
 
         if (targetOptional.isEmpty()) {
-            LegacyOfTheLucii.LOGGER.info("Demonization debug: Ctrl+5 received, but no mob was found.");
+            LegacyOfTheLucii.LOGGER.info("Demonization debug: Ctrl+7 received, but no mob was found.");
             player.sendMessage(
-                    Text.literal("Ctrl+5: моб не найден — наведи прицел на моба в радиусе 12 блоков.")
+                    Text.literal("Ctrl+7: моб не найден — наведи прицел на моба в радиусе 12 блоков.")
                             .formatted(Formatting.RED),
                     true
             );
@@ -67,14 +67,14 @@ public final class DebugDemonizeAbility {
             if (Demonization.getDemonizerUuid(target) == null) {
                 Demonization.assignDemonizer(target, player);
                 player.sendMessage(
-                        Text.literal("Ctrl+5: старому демону назначен создатель — ")
+                        Text.literal("Ctrl+7: старому демону назначен создатель — ")
                                 .append(target.getDisplayName())
                                 .formatted(Formatting.DARK_PURPLE),
                         true
                 );
             } else {
                 player.sendMessage(
-                        Text.literal("Ctrl+5: ")
+                        Text.literal("Ctrl+7: ")
                                 .append(target.getDisplayName())
                                 .append(Text.literal(" уже демонифицирован. id=" + target.getId()))
                                 .formatted(Formatting.DARK_PURPLE),
@@ -92,7 +92,7 @@ public final class DebugDemonizeAbility {
                     target.getId()
             );
             player.sendMessage(
-                    Text.literal("Ctrl+5: эффект демонизации не применился.").formatted(Formatting.RED),
+                    Text.literal("Ctrl+7: эффект демонизации не применился.").formatted(Formatting.RED),
                     true
             );
             return;
@@ -118,7 +118,7 @@ public final class DebugDemonizeAbility {
                 target.getUuid()
         );
         player.sendMessage(
-                Text.literal("Ctrl+5: демонифицирован — ")
+                Text.literal("Ctrl+7: демонифицирован — ")
                         .append(target.getDisplayName())
                         .append(Text.literal(" id=" + target.getId()))
                         .formatted(Formatting.LIGHT_PURPLE),

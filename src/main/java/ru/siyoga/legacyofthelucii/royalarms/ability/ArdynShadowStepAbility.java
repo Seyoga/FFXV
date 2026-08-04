@@ -26,7 +26,7 @@ public final class ArdynShadowStepAbility {
     private static final double AUTO_TRIGGER_GROUND_DISTANCE = 5.0D;
     private static final double AUTO_LANDING_SPEED = -0.18D;
     private static final double AUTO_HORIZONTAL_DAMPING = 0.25D;
-    private static final double SPEED = 1.15D;
+    private static final double SPEED = ArdynMovementTuning.PHASE_SPEED_PER_TICK;
     private static final DustParticleEffect ASH_PARTICLE = new DustParticleEffect(new Vector3f(0.02F, 0.01F, 0.01F), 1.45F);
 
     private static final Map<UUID, ActiveStep> ACTIVE_STEPS = new HashMap<>();
