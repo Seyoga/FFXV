@@ -9,7 +9,6 @@ import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.shape.VoxelShape;
 import net.minecraft.world.RaycastContext;
@@ -37,7 +36,6 @@ public final class ArdynPointWarpAbility {
     public static final double BLOCKS_PER_SECOND = ArdynMovementTuning.PHASE_SPEED_BLOCKS_PER_SECOND;
 
     private static final double SPEED_PER_TICK = ArdynMovementTuning.PHASE_SPEED_PER_TICK;
-    private static final double CORNER_INSET = 0.055D;
     private static final double MARKER_Y_OFFSET = 0.035D;
     private static final double FLIGHT_Y_OFFSET = 0.42D;
     private static final double LANDING_EPSILON = 0.015D;
@@ -46,15 +44,11 @@ public final class ArdynPointWarpAbility {
     private static final int MAX_STUCK_TICKS = 8;
     private static final int MANA_REGEN_INTERVAL_TICKS = 4;
     private static final int FALL_PROTECTION_TICKS = 20;
-    private static final double TOP_EPSILON = 0.045D;
 
     private static final DustParticleEffect ASH_PARTICLE = new DustParticleEffect(
             new Vector3f(0.02F, 0.01F, 0.01F),
             1.45F
     );
-
-    private static final int[] CORNER_X_SIGN = {-1, 1, 1, -1};
-    private static final int[] CORNER_Z_SIGN = {-1, -1, 1, 1};
 
     private static final Map<UUID, ActiveWarp> ACTIVE_WARPS = new HashMap<>();
     private static final Map<UUID, Integer> FALL_PROTECTION = new HashMap<>();
@@ -89,11 +83,11 @@ public final class ArdynPointWarpAbility {
             return false;
         }
         if (ArdynShadowStepAbility.isActive(player.getUuid())) {
-            LegacyOfTheLucii.LOGGER.warn("{} Rejected {}: Shadow Step is active.", LOG, playerName);
-            return false;
+            ArdynShadowStepAbility.setActive(player, false);
+            LegacyOfTheLucii.LOGGER.info("{} Cancelled Shadow Step for {} before starting Point Warp.", LOG, playerName);
         }
 
-        Target target = resolveTarget(player, blockPos, cornerIndex);
+        Target target = resolveTarget(player, blockPos);
         if (target == null) {
             LegacyOfTheLucii.LOGGER.warn("{} Rejected {}: server target validation failed.", LOG, playerName);
             return false;
@@ -251,7 +245,7 @@ public final class ArdynPointWarpAbility {
         FALL_PROTECTION.clear();
     }
 
-    private static Target resolveTarget(ServerPlayerEntity player, BlockPos blockPos, int cornerIndex) {
+    private static Target resolveTarget(ServerPlayerEntity player, BlockPos blockPos) {
         ServerWorld world = player.getServerWorld();
         BlockState state = world.getBlockState(blockPos);
         VoxelShape shape = state.getCollisionShape(world, blockPos);
@@ -302,26 +296,6 @@ public final class ArdynPointWarpAbility {
         ));
         return hit.getType() == HitResult.Type.BLOCK
                 && ((BlockHitResult) hit).getBlockPos().equals(expectedBlock);
-    }
-
-    private static boolean isCornerExposed(
-            ServerWorld world,
-            BlockPos blockPos,
-            double targetTopY,
-            int xSign,
-            int zSign
-    ) {
-        return collisionTop(world, blockPos.add(xSign, 0, 0)) < targetTopY - TOP_EPSILON
-                && collisionTop(world, blockPos.add(0, 0, zSign)) < targetTopY - TOP_EPSILON;
-    }
-
-    private static double collisionTop(ServerWorld world, BlockPos pos) {
-        BlockState state = world.getBlockState(pos);
-        VoxelShape shape = state.getCollisionShape(world, pos);
-        if (shape.isEmpty()) {
-            return Double.NEGATIVE_INFINITY;
-        }
-        return pos.getY() + shape.getMax(Direction.Axis.Y);
     }
 
     private static boolean canOccupy(ServerPlayerEntity player, Vec3d destination) {

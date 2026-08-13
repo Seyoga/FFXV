@@ -115,7 +115,6 @@ public final class ArdynBarrageWeaponRenderer extends EntityRenderer<ArdynBarrag
         }
     }
 
-    @SuppressWarnings("deprecation")
     private static final class TintedItemVertexConsumer implements VertexConsumer {
         private final VertexConsumer delegate;
         private final RenderTint tint;

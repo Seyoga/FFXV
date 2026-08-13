@@ -5,6 +5,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import ru.siyoga.legacyofthelucii.LegacyOfTheLucii;
 import ru.siyoga.legacyofthelucii.client.demon.DemonHeadgrabClient;
+import ru.siyoga.legacyofthelucii.client.render.DemonizationDebugClient;
 import ru.siyoga.legacyofthelucii.client.state.DemonizationClientState;
 import ru.siyoga.legacyofthelucii.network.DemonizationNetwork;
 
@@ -34,6 +35,7 @@ public final class DemonizationClientInitializer
         );
 
         DemonHeadgrabClient.register();
+        DemonizationDebugClient.register();
 
         ClientPlayConnectionEvents.DISCONNECT.register(
                 (handler, client) -> {

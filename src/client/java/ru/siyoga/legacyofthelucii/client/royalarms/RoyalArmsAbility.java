@@ -135,6 +135,14 @@ public final class RoyalArmsAbility {
     }
 
     private static void tick(MinecraftClient client) {
+        // END_CLIENT_TICK is still invoked while an integrated singleplayer world is
+        // paused. Freeze the whole visual state so rendering resumes from the exact
+        // same interpolation endpoints. In multiplayer, opening a screen does not
+        // make MinecraftClient report itself as paused, so the orbit keeps updating.
+        if (client.isPaused()) {
+            return;
+        }
+
         if (toggleLockTicks > 0) {
             toggleLockTicks--;
         }
@@ -399,7 +407,6 @@ public final class RoyalArmsAbility {
             float spinAngle,
             float tickDelta
     ) {
-        MatrixStack matrices = context.matrixStack();
         boolean targeted = item == targetedItem;
         float scale = ITEM_BASE_SCALE * item.visualScale(tickDelta) * item.highlightScale;
         double dx = itemPos.x - playerPos.x;

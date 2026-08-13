@@ -11,38 +11,41 @@ import net.minecraft.block.BlockState;
 import net.minecraft.particle.DustParticleEffect;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.render.LightmapTextureManager;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.render.VertexConsumer;
-import net.minecraft.client.render.WorldRenderer;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.client.world.ClientWorld;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.shape.VoxelShape;
 import net.minecraft.world.RaycastContext;
 import org.lwjgl.glfw.GLFW;
+import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import ru.siyoga.legacyofthelucii.LegacyOfTheLucii;
 import ru.siyoga.legacyofthelucii.client.state.ClientLuciiState;
 import ru.siyoga.legacyofthelucii.legacy.LuciiLegacy;
 import ru.siyoga.legacyofthelucii.network.LuciiNetwork;
 
-import java.util.HashSet;
-import java.util.Set;
 import java.util.UUID;
 
 /** Client-only target acquisition and marker rendering for Ardyn point warp. */
 public final class ArdynPointWarpClient {
     private static final String LOG = "[PointWarp/CLIENT]";
     private static final String CATEGORY = "key.categories.legacyofthelucii";
+    private static final Identifier MARKER_TEXTURE = new Identifier(
+            LegacyOfTheLucii.MOD_ID,
+            "textures/gui/pointwarp/sprite-0001.png"
+    );
     private static final double MAX_RANGE = 48.0D;
-    private static final double MARKER_Y_OFFSET = 0.035D;
+    private static final double MARKER_Y_OFFSET = 0.42D;
+    private static final float MARKER_SIZE = 0.86F;
     private static final DustParticleEffect MARKER_PARTICLE = new DustParticleEffect(
             new Vector3f(0.95F, 0.12F, 0.28F),
             0.85F
@@ -359,22 +362,48 @@ public final class ArdynPointWarpClient {
         Vec3d cameraPos = context.camera().getPos();
         Vec3d markerPos = target.markerPos();
         double time = client.world.getTime() + context.tickDelta();
-        double pulse = 0.10D + (Math.sin(time * 0.32D) + 1.0D) * 0.025D;
+        float pulseScale = 0.92F + (float) ((Math.sin(time * 0.32D) + 1.0D) * 0.04D);
+        float halfSize = MARKER_SIZE * pulseScale * 0.5F;
 
         MatrixStack matrices = context.matrixStack();
-        VertexConsumer lines = context.consumers().getBuffer(RenderLayer.getLines());
+        VertexConsumer vertices = context.consumers().getBuffer(RenderLayer.getEntityTranslucent(MARKER_TEXTURE));
         matrices.push();
         matrices.translate(
                 markerPos.x - cameraPos.x,
                 markerPos.y - cameraPos.y,
                 markerPos.z - cameraPos.z
         );
+        matrices.multiply(context.camera().getRotation());
 
-        Box outer = new Box(-pulse, -pulse, -pulse, pulse, pulse, pulse);
-        Box inner = new Box(-pulse * 0.52D, -pulse * 1.7D, -pulse * 0.52D,
-                pulse * 0.52D, pulse * 1.7D, pulse * 0.52D);
-        WorldRenderer.drawBox(matrices, lines, outer, 1.0F, 0.18F, 0.24F, 0.95F);
-        WorldRenderer.drawBox(matrices, lines, inner, 1.0F, 0.52F, 0.18F, 0.95F);
+        Matrix4f positionMatrix = matrices.peek().getPositionMatrix();
+        vertices.vertex(positionMatrix, -halfSize, -halfSize, 0.0F)
+                .color(255, 255, 255, 230)
+                .texture(0.0F, 1.0F)
+                .overlay(0, 0)
+                .light(LightmapTextureManager.MAX_LIGHT_COORDINATE)
+                .normal(0.0F, 1.0F, 0.0F)
+                .next();
+        vertices.vertex(positionMatrix, halfSize, -halfSize, 0.0F)
+                .color(255, 255, 255, 230)
+                .texture(1.0F, 1.0F)
+                .overlay(0, 0)
+                .light(LightmapTextureManager.MAX_LIGHT_COORDINATE)
+                .normal(0.0F, 1.0F, 0.0F)
+                .next();
+        vertices.vertex(positionMatrix, halfSize, halfSize, 0.0F)
+                .color(255, 255, 255, 230)
+                .texture(1.0F, 0.0F)
+                .overlay(0, 0)
+                .light(LightmapTextureManager.MAX_LIGHT_COORDINATE)
+                .normal(0.0F, 1.0F, 0.0F)
+                .next();
+        vertices.vertex(positionMatrix, -halfSize, halfSize, 0.0F)
+                .color(255, 255, 255, 230)
+                .texture(0.0F, 0.0F)
+                .overlay(0, 0)
+                .light(LightmapTextureManager.MAX_LIGHT_COORDINATE)
+                .normal(0.0F, 1.0F, 0.0F)
+                .next();
         matrices.pop();
     }
 
