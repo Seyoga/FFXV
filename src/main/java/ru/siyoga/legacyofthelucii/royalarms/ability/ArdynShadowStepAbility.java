@@ -1,22 +1,27 @@
 package ru.siyoga.legacyofthelucii.royalarms.ability;
 
-import net.minecraft.particle.DustParticleEffect;
-import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.world.RaycastContext;
-import net.minecraft.util.math.Vec3d;
-import org.joml.Vector3f;
-import ru.siyoga.legacyofthelucii.legacy.LuciiLegacy;
-import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerState;
-import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerStates;
-import ru.siyoga.legacyofthelucii.network.LuciiNetwork;
-
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
+
+import org.joml.Vector3f;
+
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
+import net.minecraft.particle.DustParticleEffect;
+import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.hit.HitResult;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.RaycastContext;
+import ru.siyoga.legacyofthelucii.legacy.LuciiLegacy;
+import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerState;
+import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerStates;
+import ru.siyoga.legacyofthelucii.network.LuciiNetwork;
 
 public final class ArdynShadowStepAbility {
     private static final int MAX_TICKS = 30;
@@ -108,6 +113,53 @@ public final class ArdynShadowStepAbility {
         return ACTIVE_STEPS.containsKey(playerUuid);
     }
 
+    public static boolean isManualStepActive(UUID playerUuid) {
+        ActiveStep step = ACTIVE_STEPS.get(playerUuid);
+        return step != null && !step.automaticLanding;
+    }
+
+    public static boolean canPhaseThrough(BlockState state) {
+        Block block = state.getBlock();
+        if (state.isIn(BlockTags.LEAVES)
+                || state.isIn(BlockTags.CLIMBABLE)
+                || state.isIn(BlockTags.FLOWERS)
+                || state.isIn(BlockTags.SAPLINGS)
+                || state.isIn(BlockTags.FENCES)
+                || state.isIn(BlockTags.FENCE_GATES)) {
+            return true;
+        }
+
+        if (state.isIn(BlockTags.DOORS) || state.isIn(BlockTags.TRAPDOORS)) {
+            return block != Blocks.SPRUCE_DOOR
+                    && block != Blocks.DARK_OAK_DOOR
+                    && block != Blocks.CRIMSON_DOOR
+                    && block != Blocks.BIRCH_DOOR
+                    && block != Blocks.MANGROVE_DOOR
+                    && block != Blocks.SPRUCE_TRAPDOOR
+                    && block != Blocks.BIRCH_TRAPDOOR
+                    && block != Blocks.DARK_OAK_TRAPDOOR
+                    && block != Blocks.WARPED_TRAPDOOR;
+        }
+
+        return block == Blocks.IRON_BARS
+                || block == Blocks.CHAIN
+                || block == Blocks.COBWEB
+                || block == Blocks.BAMBOO
+                || block == Blocks.BAMBOO_SAPLING
+                || block == Blocks.BIG_DRIPLEAF
+                || block == Blocks.BIG_DRIPLEAF_STEM
+                || block == Blocks.SMALL_DRIPLEAF
+                || block == Blocks.POINTED_DRIPSTONE
+                || block == Blocks.SCAFFOLDING
+                || block == Blocks.POWDER_SNOW
+                || block == Blocks.SNOW
+                || block == Blocks.VINE
+                || block == Blocks.TWISTING_VINES
+                || block == Blocks.TWISTING_VINES_PLANT
+                || block == Blocks.WEEPING_VINES
+                || block == Blocks.WEEPING_VINES_PLANT;
+    }
+
     public static boolean hasFallProtection(UUID playerUuid) {
         return ACTIVE_STEPS.containsKey(playerUuid) || FALL_PROTECTION.containsKey(playerUuid);
     }
@@ -117,6 +169,7 @@ public final class ArdynShadowStepAbility {
         if (state.legacy() != LuciiLegacy.ARDYN
                 || !state.royalArmsActive()
                 || (!player.getAbilities().creativeMode && !state.hasMana(1))
+                || ArdynPointWarpAbility.isActive(player.getUuid())
                 || ACTIVE_STEPS.containsKey(player.getUuid())) {
             return;
         }

@@ -92,7 +92,7 @@ public final class LuciiHudOverlay {
     }
 
     private static void renderManaLevelText(DrawContext context, MinecraftClient client, int barX) {
-        String text = ClientLuciiState.legacy() == LuciiLegacy.ARDYN
+        String text = shouldShowArdynCharges(client)
                 ? String.valueOf(ClientLuciiState.ardynWarpCharges())
                 : String.valueOf(ClientLuciiState.mana());
         int textX = (context.getScaledWindowWidth() - client.textRenderer.getWidth(text)) / 2;
@@ -102,6 +102,12 @@ public final class LuciiHudOverlay {
         context.drawText(client.textRenderer, text, textX, textY + 1, 0, false);
         context.drawText(client.textRenderer, text, textX, textY - 1, 0, false);
         context.drawText(client.textRenderer, text, textX, textY, manaColor(), false);
+    }
+
+    private static boolean shouldShowArdynCharges(MinecraftClient client) {
+        return ClientLuciiState.legacy() == LuciiLegacy.ARDYN
+                && client.player != null
+                && client.player.isSneaking();
     }
 
     private static int manaColor() {

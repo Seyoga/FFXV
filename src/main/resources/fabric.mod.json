@@ -14,12 +14,14 @@
     "main": [
       "ru.siyoga.legacyofthelucii.LegacyOfTheLucii",
       "ru.siyoga.legacyofthelucii.DemonizationNetworkingInitializer",
-      "ru.siyoga.legacyofthelucii.pointwarp.ArdynPointWarpInitializer"
+      "ru.siyoga.legacyofthelucii.pointwarp.ArdynPointWarpInitializer",
+      "ru.siyoga.legacyofthelucii.darktornado.ArdynDarkTornadoInitializer"
     ],
     "client": [
       "ru.siyoga.legacyofthelucii.client.LegacyOfTheLuciiClient",
       "ru.siyoga.legacyofthelucii.client.DemonizationClientInitializer",
-      "ru.siyoga.legacyofthelucii.client.pointwarp.ArdynPointWarpClientInitializer"
+      "ru.siyoga.legacyofthelucii.client.pointwarp.ArdynPointWarpClientInitializer",
+      "ru.siyoga.legacyofthelucii.client.darktornado.ArdynDarkTornadoClientInitializer"
     ]
   },
   "mixins": [

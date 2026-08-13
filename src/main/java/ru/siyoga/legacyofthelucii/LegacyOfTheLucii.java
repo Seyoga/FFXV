@@ -38,6 +38,7 @@ import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsOrbitDamageAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsWallAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsWarpStrikeAbility;
 
+@SuppressWarnings("unused")
 public final class LegacyOfTheLucii implements ModInitializer {
     public static final String MOD_ID = "legacyofthelucii";
     public static final Logger LOGGER = LoggerFactory.getLogger("Legacy of the Lucii");

@@ -1,7 +1,5 @@
 package ru.siyoga.legacyofthelucii.block;
 
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockEntityProvider;
 import net.minecraft.block.BlockRenderType;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.BlockWithEntity;
@@ -16,7 +14,7 @@ import net.minecraft.world.World;
 import org.jetbrains.annotations.Nullable;
 import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsWallAbility;
 
-public final class RoyalArmsWallBlock extends BlockWithEntity implements BlockEntityProvider {
+public final class RoyalArmsWallBlock extends BlockWithEntity {
     public RoyalArmsWallBlock(Settings settings) {
         super(settings);
     }
@@ -39,6 +37,7 @@ public final class RoyalArmsWallBlock extends BlockWithEntity implements BlockEn
     }
 
     @Override
+    @SuppressWarnings("deprecation")
     public float calcBlockBreakingDelta(BlockState state, PlayerEntity player, BlockView world, BlockPos pos) {
         BlockEntity blockEntity = world.getBlockEntity(pos);
         if (blockEntity instanceof RoyalArmsWallBlockEntity wallBlockEntity) {
@@ -48,6 +47,7 @@ public final class RoyalArmsWallBlock extends BlockWithEntity implements BlockEn
     }
 
     @Override
+    @SuppressWarnings("deprecation")
     public void onStateReplaced(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
         if (!state.isOf(newState.getBlock()) && !world.isClient && world instanceof ServerWorld serverWorld) {
             BlockEntity blockEntity = world.getBlockEntity(pos);

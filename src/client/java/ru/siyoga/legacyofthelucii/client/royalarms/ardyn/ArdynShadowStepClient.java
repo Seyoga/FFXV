@@ -67,6 +67,11 @@ public final class ArdynShadowStepClient {
         return !renderingSilhouette && state != null && (state.active || state.lastUpdateTick + ACTIVE_GRACE_TICKS >= now);
     }
 
+    public static boolean isActive(UUID ownerUuid) {
+        VisualState state = VISUALS.get(ownerUuid);
+        return state != null && state.active && state.screenOverlay;
+    }
+
     public static void clear() {
         VISUALS.clear();
     }

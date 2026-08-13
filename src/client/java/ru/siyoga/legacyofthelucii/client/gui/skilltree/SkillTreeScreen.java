@@ -102,6 +102,7 @@ public final class SkillTreeScreen extends Screen {
             renderSkillNode(context, x + PAGE_WIDTH / 2 + 29 + (int) Math.round(scrollX), rowY, Items.CROSSBOW.getDefaultStack(), Text.translatable("skill.legacyofthelucii.royal_arms.bind"), mouseX, mouseY);
             renderSkillNode(context, x + PAGE_WIDTH / 2 + 71 + (int) Math.round(scrollX), rowY, Items.SPECTRAL_ARROW.getDefaultStack(), Text.translatable("skill.legacyofthelucii.ardyn.barrage"), mouseX, mouseY);
             renderSkillNode(context, x + PAGE_WIDTH / 2 + 71 + (int) Math.round(scrollX), rowY + 34, Items.WITHER_SKELETON_SKULL.getDefaultStack(), Text.translatable("skill.legacyofthelucii.ardyn.overkill"), mouseX, mouseY);
+            renderSkillNode(context, x + PAGE_WIDTH / 2 + 29 + (int) Math.round(scrollX), rowY + 34, Items.FIRE_CHARGE.getDefaultStack(), Text.translatable("skill.legacyofthelucii.ardyn.dark_tornado"), mouseX, mouseY);
             return;
         }
         if (ClientLuciiState.legacy() != LuciiLegacy.NOCTIS) return;
