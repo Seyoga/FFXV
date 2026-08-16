@@ -60,6 +60,10 @@ public final class MasqueradeManager {
             clearActiveMorph(player);
             return false;
         }
+        if (state.ardynOverkillActive()) {
+            MasqueradeNetwork.sendOwnerState(player);
+            return false;
+        }
 
         MasqueradeMorph requested = state.findUnlockedMorph(morphKey);
         if (requested == null) {
@@ -84,13 +88,23 @@ public final class MasqueradeManager {
         return true;
     }
 
+    public static boolean clearTarget(ServerPlayerEntity player) {
+        LuciiPlayerState state = LuciiPlayerStates.get(player);
+        if (state.legacy() != LuciiLegacy.ARDYN || state.masqueradeTargetUuid() == null) {
+            return false;
+        }
+        return clearTarget(player, true);
+    }
+
     public static boolean selectTarget(ServerPlayerEntity player, java.util.UUID targetUuid) {
         LuciiPlayerState state = LuciiPlayerStates.get(player);
-        if (state.legacy() != LuciiLegacy.ARDYN || targetUuid == null || targetUuid.equals(player.getUuid())) {
+        if (state.legacy() != LuciiLegacy.ARDYN
+                || state.ardynOverkillActive()
+                || targetUuid == null
+                || targetUuid.equals(player.getUuid())) {
             return false;
         }
 
-        MinecraftServer server = player.getServer();
         Entity target = player.getServerWorld().getEntity(targetUuid);
         if (!isEligibleTarget(player, target)
                 || player.squaredDistanceTo(target) > TARGET_SELECT_RANGE * TARGET_SELECT_RANGE) {
@@ -99,9 +113,11 @@ public final class MasqueradeManager {
         }
 
         java.util.UUID previousTarget = state.masqueradeTargetUuid();
+        if (previousTarget != null && !previousTarget.equals(targetUuid)) {
+            clearMobPerception(player, previousTarget);
+        }
         state.setMasqueradeTargetUuid(targetUuid);
-        DRAIN_TICKS.remove(player.getUuid());
-        SWAP_VISIBLE.remove(player.getUuid());
+        clearRuntimeState(player.getUuid());
         if (previousTarget != null && !previousTarget.equals(targetUuid)) {
             MasqueradeNetwork.clearObserverVisual(player, previousTarget);
         }
@@ -114,13 +130,19 @@ public final class MasqueradeManager {
     public static void tick(MinecraftServer server) {
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
             LuciiPlayerState state = LuciiPlayerStates.get(player);
-            if (state.legacy() != LuciiLegacy.ARDYN || state.activeMorph() == null || !hasAvailableTarget(player, state)) {
-                if (DRAIN_TICKS.remove(player.getUuid()) != null) {
-                    // The observer may have changed dimensions while the illusion was active.
-                    // Clear its client-only replacement before it can become stale on return.
-                    MasqueradeNetwork.clearObserverVisual(player, state.masqueradeTargetUuid());
-                }
-                SWAP_VISIBLE.remove(player.getUuid());
+            if (state.legacy() != LuciiLegacy.ARDYN) {
+                clearRuntimeState(player.getUuid());
+                continue;
+            }
+
+            LivingEntity target = getTargetEntity(player);
+            if (state.masqueradeTargetUuid() != null && target == null) {
+                clearTarget(player, true);
+                target = null;
+            }
+
+            if (state.activeMorph() == null || target == null) {
+                clearRuntimeState(player.getUuid());
                 continue;
             }
 
@@ -136,7 +158,9 @@ public final class MasqueradeManager {
             }
             DRAIN_TICKS.put(player.getUuid(), elapsed);
 
-            refreshMobTarget(player);
+            if (target instanceof MobEntity mob) {
+                MasqueradePerception.refreshTargetRetention(mob, player);
+            }
 
             boolean swapVisible = MasqueradeNetwork.isSwapVisible(player);
             Boolean previousSwapVisible = SWAP_VISIBLE.put(player.getUuid(), swapVisible);
@@ -146,10 +170,43 @@ public final class MasqueradeManager {
         }
     }
 
+    public static void onPlayerEntityReplaced(ServerPlayerEntity player) {
+        clearTarget(player, false);
+    }
+
     public static void onDisconnect(ServerPlayerEntity player) {
-        MasqueradeNetwork.clearObserverVisual(player, playerStateTarget(player));
-        DRAIN_TICKS.remove(player.getUuid());
-        SWAP_VISIBLE.remove(player.getUuid());
+        MinecraftServer server = player.getServer();
+        java.util.UUID disconnectedUuid = player.getUuid();
+
+        LuciiPlayerState ownState = LuciiPlayerStates.get(player);
+        java.util.UUID ownTarget = ownState.masqueradeTargetUuid();
+        if (ownTarget != null) {
+            clearMobPerception(player, ownTarget);
+            MasqueradeNetwork.clearObserverVisual(player, ownTarget);
+            ownState.setMasqueradeTargetUuid(null);
+        }
+        clearRuntimeState(disconnectedUuid);
+
+        if (server == null) {
+            return;
+        }
+
+        for (ServerPlayerEntity owner : server.getPlayerManager().getPlayerList()) {
+            if (owner == player) {
+                continue;
+            }
+            LuciiPlayerState state = LuciiPlayerStates.get(owner);
+            if (!disconnectedUuid.equals(state.masqueradeTargetUuid())) {
+                continue;
+            }
+
+            MasqueradeNetwork.clearObserverVisual(owner, disconnectedUuid);
+            state.setMasqueradeTargetUuid(null);
+            clearRuntimeState(owner.getUuid());
+            MasqueradeNetwork.sendOwnerState(owner);
+        }
+
+        server.execute(() -> refreshSwapsAfterPlayerLeft(server, disconnectedUuid));
     }
 
     public static void clearIfUnavailable(ServerPlayerEntity player) {
@@ -159,18 +216,72 @@ public final class MasqueradeManager {
         }
     }
 
+    public static void clearForOverkill(ServerPlayerEntity player) {
+        clearTarget(player, true);
+    }
+
     private static void syncChangedState(ServerPlayerEntity player) {
         MasqueradeNetwork.sendOwnerState(player);
         MasqueradeNetwork.sendObserverVisualState(player);
         refreshMobTarget(player);
-        DRAIN_TICKS.remove(player.getUuid());
-        SWAP_VISIBLE.remove(player.getUuid());
+        clearRuntimeState(player.getUuid());
     }
 
     private static void clearActiveMorph(ServerPlayerEntity player) {
         LuciiPlayerState state = LuciiPlayerStates.get(player);
+        java.util.UUID targetUuid = state.masqueradeTargetUuid();
         if (state.setActiveMorph(null)) {
+            clearMobPerception(player, targetUuid);
             syncChangedState(player);
+        }
+    }
+
+    private static boolean clearTarget(ServerPlayerEntity player, boolean syncOwner) {
+        LuciiPlayerState state = LuciiPlayerStates.get(player);
+        java.util.UUID targetUuid = state.masqueradeTargetUuid();
+        if (targetUuid == null) {
+            return false;
+        }
+
+        clearMobPerception(player, targetUuid);
+        MasqueradeNetwork.clearObserverVisual(player, targetUuid);
+        state.setMasqueradeTargetUuid(null);
+        clearRuntimeState(player.getUuid());
+        if (syncOwner) {
+            MasqueradeNetwork.sendOwnerState(player);
+        }
+        return true;
+    }
+
+    private static void clearRuntimeState(java.util.UUID playerUuid) {
+        DRAIN_TICKS.remove(playerUuid);
+        SWAP_VISIBLE.remove(playerUuid);
+    }
+    private static void clearMobPerception(ServerPlayerEntity player, java.util.UUID targetUuid) {
+        if (targetUuid == null) {
+            return;
+        }
+        Entity target = player.getServerWorld().getEntity(targetUuid);
+        if (target instanceof MobEntity mob) {
+            MasqueradePerception.clearMasqueradeAggression(mob, player);
+        } else {
+            MasqueradePerception.forgetMasqueradeAggression(targetUuid, player.getUuid());
+        }
+    }
+
+
+    private static void refreshSwapsAfterPlayerLeft(MinecraftServer server, java.util.UUID disconnectedUuid) {
+        for (ServerPlayerEntity owner : server.getPlayerManager().getPlayerList()) {
+            LuciiPlayerState state = LuciiPlayerStates.get(owner);
+            MasqueradeMorph morph = state.activeMorph();
+            if (morph == null
+                    || morph.kind() != MasqueradeMorph.Kind.PLAYER
+                    || morph.playerProfile() == null
+                    || !disconnectedUuid.equals(morph.playerProfile().getId())) {
+                continue;
+            }
+            SWAP_VISIBLE.put(owner.getUuid(), false);
+            MasqueradeNetwork.sendObserverVisualState(owner);
         }
     }
 
@@ -196,9 +307,5 @@ public final class MasqueradeManager {
         if (target instanceof MobEntity mob) {
             MasqueradePerception.refreshTargetRetention(mob, player);
         }
-    }
-
-    private static java.util.UUID playerStateTarget(ServerPlayerEntity player) {
-        return LuciiPlayerStates.get(player).masqueradeTargetUuid();
     }
 }

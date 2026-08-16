@@ -1,5 +1,6 @@
 package ru.siyoga.legacyofthelucii.masquerade;
 
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.ai.TargetPredicate;
@@ -7,6 +8,7 @@ import net.minecraft.entity.ai.goal.ActiveTargetGoal;
 import net.minecraft.entity.ai.goal.Goal;
 import net.minecraft.entity.ai.goal.PrioritizedGoal;
 import net.minecraft.entity.ai.goal.RevengeGoal;
+import net.minecraft.entity.mob.Angerable;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.registry.Registries;
@@ -17,13 +19,14 @@ import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerState;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerStates;
 import ru.siyoga.legacyofthelucii.masquerade.ai.ActiveTargetGoalAccess;
 import ru.siyoga.legacyofthelucii.masquerade.ai.MobEntityTargetSelectorAccess;
-import ru.siyoga.legacyofthelucii.masquerade.ai.TargetPredicateAccess;
 
-/**
- * Server-side perception for a single marked mob. It never changes the player
- * entity; it only adapts the class checks made by that mob's vanilla target goals.
- */
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+
 public final class MasqueradePerception {
+    private static final Map<UUID, UUID> MASQUERADE_AGGRESSION = new HashMap<>();
+
     private MasqueradePerception() {
     }
 
@@ -75,26 +78,119 @@ public final class MasqueradePerception {
         if (perceivedType == null) {
             return targetPredicate.test(observer, candidate);
         }
-        if (!targetClass.isAssignableFrom(perceivedType.getBaseClass())) {
+        if (!candidate.isAlive() || candidate.isRemoved() || observer.isTeammate(candidate)) {
             return false;
         }
-        // The regular predicate is retained when it already accepts the real player.
-        // Its optional custom predicate can contain instanceof checks, so the fallback
-        // reproduces the standard non-type checks after the perceived class matched.
-        return targetPredicate.test(observer, candidate)
-                || passesStandardTargetChecks(observer, candidate, targetPredicate);
+        if (candidate instanceof PlayerEntity player && (player.isCreative() || player.isSpectator())) {
+            return false;
+        }
+
+        if (perceivedType == EntityType.PLAYER) {
+            return targetClass.isInstance(candidate) && targetPredicate.test(observer, candidate);
+        }
+
+        LivingEntity perceivedEntity = createPerceivedEntity(observer, candidate, perceivedType);
+        if (perceivedEntity == null || !targetClass.isInstance(perceivedEntity)) {
+            return false;
+        }
+
+        return targetPredicate.test(observer, perceivedEntity);
+    }
+
+    public static void markMasqueradeAcquisition(MobEntity observer, ServerPlayerEntity player) {
+        if (observer.getAttacker() == player || hasRunningRevengeGoal(observer)) {
+            MASQUERADE_AGGRESSION.remove(observer.getUuid());
+            return;
+        }
+        MASQUERADE_AGGRESSION.put(observer.getUuid(), player.getUuid());
     }
 
     public static void refreshTargetRetention(MobEntity observer, ServerPlayerEntity player) {
-        if (observer.getTarget() != player || getPerceivedEntityType(observer, player) == null) {
+        if (getPerceivedEntityType(observer, player) == null) {
             return;
         }
-        if (hasRunningRevengeGoal(observer)) {
+        if (observer.getAttacker() == player || hasRunningRevengeGoal(observer)) {
+            forgetMasqueradeAggression(observer, player);
             return;
         }
-        if (!isAllowedByConfiguredVanillaGoals(observer, player)) {
+        boolean canRetainTarget = isAllowedByConfiguredVanillaGoals(observer, player);
+        MasqueradeDebug.logRetention(observer, player, "refreshTargetRetention.before", canRetainTarget);
+        if (canRetainTarget) {
+            return;
+        }
+        // This target can predate the Masquerade. It is therefore not necessarily
+        // present in MASQUERADE_AGGRESSION, but it is still invalid now.
+        clearTargetAndAnger(observer, player);
+        forgetMasqueradeAggression(observer, player);
+        MasqueradeDebug.logRetention(observer, player, "refreshTargetRetention.afterClear", false);
+    }
+
+    public static void clearMasqueradeAggression(MobEntity observer, ServerPlayerEntity player) {
+        if (!isMasqueradeAggression(observer, player)) {
+            return;
+        }
+        MASQUERADE_AGGRESSION.remove(observer.getUuid());
+        if (observer.getAttacker() == player || hasRunningRevengeGoal(observer)) {
+            return;
+        }
+        if (isAllowedByConfiguredVanillaGoalsReal(observer, player)) {
+            return;
+        }
+        clearTargetAndAnger(observer, player);
+    }
+
+    public static void forgetMasqueradeAggression(UUID observerUuid, UUID playerUuid) {
+        if (playerUuid.equals(MASQUERADE_AGGRESSION.get(observerUuid))) {
+            MASQUERADE_AGGRESSION.remove(observerUuid);
+        }
+    }
+
+    private static void forgetMasqueradeAggression(MobEntity observer, ServerPlayerEntity player) {
+        if (isMasqueradeAggression(observer, player)) {
+            MASQUERADE_AGGRESSION.remove(observer.getUuid());
+        }
+    }
+
+    private static boolean isMasqueradeAggression(MobEntity observer, ServerPlayerEntity player) {
+        return player.getUuid().equals(MASQUERADE_AGGRESSION.get(observer.getUuid()));
+    }
+
+    private static void clearTargetAndAnger(MobEntity observer, ServerPlayerEntity player) {
+        if (observer.getTarget() == player) {
             observer.setTarget(null);
         }
+        if (observer instanceof Angerable angerable && player.getUuid().equals(angerable.getAngryAt())) {
+            angerable.stopAnger();
+        }
+    }
+
+    private static LivingEntity createPerceivedEntity(
+            MobEntity observer,
+            LivingEntity candidate,
+            EntityType<?> perceivedType
+    ) {
+        Entity entity;
+        try {
+            entity = perceivedType.create(observer.getWorld());
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+        if (!(entity instanceof LivingEntity perceivedEntity)) {
+            return null;
+        }
+
+        perceivedEntity.setId(candidate.getId());
+        perceivedEntity.setUuid(candidate.getUuid());
+        perceivedEntity.refreshPositionAndAngles(
+                candidate.getX(),
+                candidate.getY(),
+                candidate.getZ(),
+                candidate.getYaw(),
+                candidate.getPitch()
+        );
+        perceivedEntity.setInvisible(candidate.isInvisible());
+        perceivedEntity.setOnGround(candidate.isOnGround());
+        return perceivedEntity;
     }
 
     private static boolean hasRunningRevengeGoal(MobEntity observer) {
@@ -123,30 +219,24 @@ public final class MasqueradePerception {
                 return true;
             }
         }
-        // Fully custom mod AI that does not use ActiveTargetGoal is left untouched.
         return !hasActiveTargetGoal;
     }
 
-    private static boolean passesStandardTargetChecks(
-            MobEntity observer,
-            LivingEntity candidate,
-            TargetPredicate targetPredicate
-    ) {
-        TargetPredicateAccess access = (TargetPredicateAccess) targetPredicate;
-        if (!candidate.isAlive() || candidate.isRemoved() || observer.isTeammate(candidate)) {
-            return false;
+    private static boolean isAllowedByConfiguredVanillaGoalsReal(MobEntity observer, ServerPlayerEntity player) {
+        boolean hasActiveTargetGoal = false;
+        for (PrioritizedGoal prioritizedGoal : ((MobEntityTargetSelectorAccess) observer)
+                .legacyofthelucii$getTargetSelector().getGoals()) {
+            Goal goal = prioritizedGoal.getGoal();
+            if (!(goal instanceof ActiveTargetGoal<?> activeTargetGoal)
+                    || !(activeTargetGoal instanceof ActiveTargetGoalAccess access)) {
+                continue;
+            }
+            hasActiveTargetGoal = true;
+            if (access.legacyofthelucii$getTargetClass().isInstance(player)
+                    && access.legacyofthelucii$getTargetPredicate().test(observer, player)) {
+                return true;
+            }
         }
-        if (candidate instanceof PlayerEntity player && (player.isCreative() || player.isSpectator())) {
-            return false;
-        }
-        if (access.legacyofthelucii$isAttackable() && !observer.canTarget(candidate)) {
-            return false;
-        }
-        double maxDistance = access.legacyofthelucii$getBaseMaxDistance();
-        if (maxDistance >= 0.0D && observer.squaredDistanceTo(candidate) > maxDistance * maxDistance) {
-            return false;
-        }
-        return !access.legacyofthelucii$respectsVisibility()
-                || observer.getVisibilityCache().canSee(candidate);
+        return !hasActiveTargetGoal;
     }
 }

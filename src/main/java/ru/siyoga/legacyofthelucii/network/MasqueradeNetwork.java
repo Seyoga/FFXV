@@ -19,6 +19,7 @@ import ru.siyoga.legacyofthelucii.masquerade.MasqueradeMorph;
 public final class MasqueradeNetwork {
     public static final Identifier SELECT_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "masquerade_select");
     public static final Identifier TARGET_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "masquerade_target");
+    public static final Identifier CLEAR_TARGET_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "masquerade_clear_target");
     public static final Identifier OWNER_STATE_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "masquerade_owner_state");
     public static final Identifier OBSERVER_VISUAL_STATE_PACKET = new Identifier(
             LegacyOfTheLucii.MOD_ID,
@@ -37,6 +38,8 @@ public final class MasqueradeNetwork {
             java.util.UUID targetUuid = buf.readUuid();
             server.execute(() -> MasqueradeManager.selectTarget(player, targetUuid));
         });
+        ServerPlayNetworking.registerGlobalReceiver(CLEAR_TARGET_PACKET, (server, player, handler, buf, responseSender) ->
+                server.execute(() -> MasqueradeManager.clearTarget(player)));
 
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             ServerPlayerEntity joiningPlayer = handler.player;
@@ -47,6 +50,9 @@ public final class MasqueradeNetwork {
 
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
                 MasqueradeManager.onDisconnect(handler.player));
+
+        ServerPlayerEvents.COPY_FROM.register((oldPlayer, newPlayer, alive) ->
+                MasqueradeManager.onPlayerEntityReplaced(oldPlayer));
 
         ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
             sendOwnerState(newPlayer);
@@ -64,12 +70,13 @@ public final class MasqueradeNetwork {
             morph.write(buf);
         }
         writeOptionalMorph(buf, activeMorph(state));
-        java.util.UUID targetUuid = state.masqueradeTargetUuid();
+
+        LivingEntity target = MasqueradeManager.getTargetEntity(player);
+        java.util.UUID targetUuid = target == null ? null : state.masqueradeTargetUuid();
         buf.writeBoolean(targetUuid != null);
         if (targetUuid != null) {
             buf.writeUuid(targetUuid);
-            LivingEntity target = MasqueradeManager.getTargetEntity(player);
-            buf.writeInt(target == null ? -1 : target.getId());
+            buf.writeInt(target.getId());
         }
         ServerPlayNetworking.send(player, OWNER_STATE_PACKET, buf);
     }
@@ -101,7 +108,8 @@ public final class MasqueradeNetwork {
         }
         for (ServerPlayerEntity owner : server.getPlayerManager().getPlayerList()) {
             LuciiPlayerState state = LuciiPlayerStates.get(owner);
-            if (viewer.getUuid().equals(state.masqueradeTargetUuid())) {
+            if (viewer.getUuid().equals(state.masqueradeTargetUuid())
+                    && MasqueradeManager.getTargetEntity(owner) == viewer) {
                 sendObserverVisualState(viewer, owner, activeMorph(state));
             }
         }

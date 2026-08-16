@@ -73,6 +73,10 @@ public final class MasqueradeClient {
         ClientPlayNetworking.send(MasqueradeNetwork.TARGET_PACKET, buf);
     }
 
+    public static void clearTarget() {
+        ClientPlayNetworking.send(MasqueradeNetwork.CLEAR_TARGET_PACKET, PacketByteBufs.create());
+    }
+
     private static MasqueradeMorph readOptionalMorph(PacketByteBuf buf) {
         return buf.readBoolean() ? MasqueradeMorph.read(buf) : null;
     }

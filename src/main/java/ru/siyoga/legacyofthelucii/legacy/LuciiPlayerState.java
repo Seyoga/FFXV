@@ -29,7 +29,6 @@ public final class LuciiPlayerState {
     private static final String MANA_REGEN_DELAY_KEY = "ManaRegenDelay";
     private static final String MASQUERADE_MORPHS_KEY = "MasqueradeMorphs";
     private static final String MASQUERADE_ACTIVE_KEY = "MasqueradeActive";
-    private static final String MASQUERADE_TARGET_KEY = "MasqueradeTarget";
     private static final String MASQUERADE_DATA_VERSION_KEY = "MasqueradeDataVersion";
     private static final int MASQUERADE_DATA_VERSION = 1;
     private static final Set<String> LEGACY_STARTER_MORPH_KEYS = Set.of(
@@ -145,7 +144,9 @@ public final class LuciiPlayerState {
     }
 
     public void setRoyalArmsActive(boolean active) {
-        royalArmsActive = active && hasLegacy();
+        royalArmsActive = active
+                && hasLegacy()
+                && !(legacy == LuciiLegacy.ARDYN && ardynOverkillActive);
     }
 
     public RoyalArmsInventoryFilter royalArmsFilter() {
@@ -177,6 +178,7 @@ public final class LuciiPlayerState {
         }
 
         ardynOverkillActive = true;
+        royalArmsActive = false;
         mana = 0;
         manaRegenDelay = 0;
         regenTimer = 0;
@@ -197,7 +199,6 @@ public final class LuciiPlayerState {
             return true;
         }
 
-        // During Overkill the mana bar is a recovery timer, not a spendable resource.
         if (ardynOverkillActive || mana < amount) {
             return false;
         }
@@ -285,8 +286,7 @@ public final class LuciiPlayerState {
                 && legacy == LuciiLegacy.ARDYN
                 && mana < maxMana;
         if (ardynOverkillActive) {
-            // Preserve the exact online recovery position, but never advance it while offline.
-            // The interval is clamped so old/corrupt NBT cannot instantly refill mana on login.
+            royalArmsActive = false;
             regenTimer = Math.min(regenTimer, ARDYN_OVERKILL_MANA_REGEN_INTERVAL - 1);
             manaRegenDelay = 0;
         }
@@ -305,9 +305,10 @@ public final class LuciiPlayerState {
                     .filter(morph -> unlockedMorphs.containsKey(morph.key()))
                     .ifPresent(morph -> activeMorph = unlockedMorphs.get(morph.key()));
         }
-        masqueradeTargetUuid = legacy == LuciiLegacy.ARDYN && nbt.containsUuid(MASQUERADE_TARGET_KEY)
-                ? nbt.getUuid(MASQUERADE_TARGET_KEY)
-                : null;
+
+        // The selected form is persistent, but the marked observer is a live session target.
+        // Never restore a target UUID after reconnect/respawn/world reload.
+        masqueradeTargetUuid = null;
     }
     public void writeNbt(NbtCompound nbt) {
         nbt.putInt(MANA_KEY, mana);
@@ -330,9 +331,6 @@ public final class LuciiPlayerState {
         nbt.putInt(MASQUERADE_DATA_VERSION_KEY, MASQUERADE_DATA_VERSION);
         if (activeMorph != null && legacy == LuciiLegacy.ARDYN) {
             nbt.put(MASQUERADE_ACTIVE_KEY, activeMorph.writeNbt());
-        }
-        if (masqueradeTargetUuid != null && legacy == LuciiLegacy.ARDYN) {
-            nbt.putUuid(MASQUERADE_TARGET_KEY, masqueradeTargetUuid);
         }
     }
     private int experienceForNextLevel() {

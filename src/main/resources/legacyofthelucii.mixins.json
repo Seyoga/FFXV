@@ -12,6 +12,7 @@
     "LivingEntityMixin",
     "TargetPredicateMixin",
     "TrackTargetGoalAccessor",
+    "TrackTargetGoalMixin",
     "UntamedActiveTargetGoalMixin"
   ],
   "client": [

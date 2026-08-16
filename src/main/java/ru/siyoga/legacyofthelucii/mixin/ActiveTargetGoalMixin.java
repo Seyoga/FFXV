@@ -13,6 +13,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import ru.siyoga.legacyofthelucii.masquerade.MasqueradeDebug;
 import ru.siyoga.legacyofthelucii.masquerade.MasqueradePerception;
 import ru.siyoga.legacyofthelucii.masquerade.ai.ActiveTargetGoalAccess;
 import ru.siyoga.legacyofthelucii.masquerade.ai.TrackTargetGoalAccess;
@@ -55,16 +56,26 @@ public abstract class ActiveTargetGoalMixin<T extends LivingEntity> implements A
         if (deceiver == null) {
             return;
         }
-        if (!MasqueradePerception.canGoalTarget(observer, deceiver, targetClass, targetPredicate)) {
+        boolean canGoalTarget = MasqueradePerception.canGoalTarget(observer, deceiver, targetClass, targetPredicate);
+        MasqueradeDebug.logGoalDecision(
+                observer,
+                deceiver,
+                (ActiveTargetGoal<?>) (Object) this,
+                "ActiveTargetGoal.canStart.head",
+                targetClass,
+                canGoalTarget,
+                null
+        );
+        if (!canGoalTarget) {
             return;
         }
 
-        // The vanilla query is still used for ordinary entities. It cannot see the
-        // deceiver for non-player target classes, so add the perceived candidate
-        // before the goal's reciprocal-chance early return can discard the search.
         findClosestTarget();
         if (targetEntity == null || observer.squaredDistanceTo(deceiver) < observer.squaredDistanceTo(targetEntity)) {
             targetEntity = deceiver;
+        }
+        if (targetEntity == deceiver) {
+            MasqueradePerception.markMasqueradeAcquisition(observer, deceiver);
         }
         cir.setReturnValue(targetEntity != null);
     }
@@ -73,9 +84,20 @@ public abstract class ActiveTargetGoalMixin<T extends LivingEntity> implements A
     private void legacyofthelucii$rejectInvalidPerceivedPlayerTarget(CallbackInfoReturnable<Boolean> cir) {
         MobEntity observer = ((TrackTargetGoalAccess) this).legacyofthelucii$getMob();
         ServerPlayerEntity deceiver = MasqueradePerception.getDeceiver(observer);
-        if (deceiver != null
-                && !MasqueradePerception.canGoalTarget(observer, deceiver, targetClass, targetPredicate)
-                && targetEntity == deceiver) {
+        if (deceiver == null) {
+            return;
+        }
+        boolean canGoalTarget = MasqueradePerception.canGoalTarget(observer, deceiver, targetClass, targetPredicate);
+        MasqueradeDebug.logGoalDecision(
+                observer,
+                deceiver,
+                (ActiveTargetGoal<?>) (Object) this,
+                "ActiveTargetGoal.canStart.tail",
+                targetClass,
+                canGoalTarget,
+                cir.getReturnValue()
+        );
+        if (!canGoalTarget && targetEntity == deceiver) {
             targetEntity = null;
             cir.setReturnValue(false);
         }

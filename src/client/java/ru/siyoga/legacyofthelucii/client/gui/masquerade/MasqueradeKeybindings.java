@@ -16,6 +16,7 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
 import ru.siyoga.legacyofthelucii.client.masquerade.MasqueradeClient;
+import ru.siyoga.legacyofthelucii.client.masquerade.MasqueradeClientState;
 import ru.siyoga.legacyofthelucii.client.state.ClientLuciiState;
 import ru.siyoga.legacyofthelucii.legacy.LuciiLegacy;
 
@@ -63,6 +64,10 @@ public final class MasqueradeKeybindings {
                 return;
             }
             MasqueradeClient.selectTarget(target.getUuid());
+            return;
+        }
+        if (MasqueradeClientState.localTargetUuid() != null) {
+            MasqueradeClient.clearTarget();
             return;
         }
         client.player.sendMessage(
