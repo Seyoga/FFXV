@@ -5,13 +5,20 @@
   "compatibilityLevel": "JAVA_17",
   "mixins": [
     "AbstractBlockStateMixin",
+    "ActiveTargetGoalMixin",
+    "MobEntityTargetSelectorAccess",
     "PlayerEntityMixin",
-    "LivingEntityMixin"
+    "RaidGoalMixin",
+    "LivingEntityMixin",
+    "TargetPredicateMixin",
+    "TrackTargetGoalAccessor",
+    "UntamedActiveTargetGoalMixin"
   ],
   "client": [
     "AbstractBlockStateClientMixin",
     "AbstractClientPlayerEntityMixin",
     "EntityRenderDispatcherMixin",
+    "LimbAnimatorAccessor",
     "PlayerEntityRendererMixin",
     "LivingEntityClientMixin",
     "InGameHudMixin"

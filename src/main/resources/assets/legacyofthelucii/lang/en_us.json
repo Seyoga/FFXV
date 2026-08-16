@@ -46,5 +46,13 @@
   "key.legacyofthelucii.royal_arms.ardyn_dark_tornado": "Royal Arms: Ardyn Dark Tornado",
   "key.legacyofthelucii.royal_arms.guard": "Royal Arms: Phantom Guard",
   "key.legacyofthelucii.royal_arms.debug_demonize": "Royal Arms: Debug Demonize",
-  "key.legacyofthelucii.skill_tree.open": "Open Royal Arms Skill Tree"
+  "key.legacyofthelucii.skill_tree.open": "Open Royal Arms Skill Tree",
+  "key.legacyofthelucii.masquerade.open": "Open Masquerade",
+  "screen.legacyofthelucii.masquerade": "Masquerade",
+  "screen.legacyofthelucii.masquerade.search": "Search...",
+  "message.legacyofthelucii.masquerade.requires_ardyn": "Masquerade is available only to Ardyn.",
+  "message.legacyofthelucii.masquerade.requires_target": "Select a player to deceive first.",
+  "message.legacyofthelucii.masquerade.target_player": "Look at a player or mob to select a Masquerade target.",
+  "message.legacyofthelucii.masquerade.target_too_far": "Target is too far away.",
+  "message.legacyofthelucii.masquerade.invalid_target": "That entity is not available as a Masquerade target."
 }

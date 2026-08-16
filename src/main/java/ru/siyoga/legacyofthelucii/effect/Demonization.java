@@ -8,6 +8,7 @@ import net.minecraft.server.world.ServerWorld;
 import org.jetbrains.annotations.Nullable;
 import ru.siyoga.legacyofthelucii.LegacyOfTheLucii;
 import ru.siyoga.legacyofthelucii.demon.DemonizedMobData;
+import ru.siyoga.legacyofthelucii.masquerade.MasqueradeManager;
 import ru.siyoga.legacyofthelucii.network.DemonizationNetwork;
 
 import java.util.UUID;
@@ -65,6 +66,10 @@ public final class Demonization {
 
             if (mob.getWorld() instanceof ServerWorld world) {
                 DemonizationNetwork.broadcast(world, mob, true);
+            }
+
+            if (demonizer instanceof ServerPlayerEntity player) {
+                MasqueradeManager.unlockMorph(player, mob);
             }
         }
 

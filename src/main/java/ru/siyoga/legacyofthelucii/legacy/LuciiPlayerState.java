@@ -1,6 +1,16 @@
 package ru.siyoga.legacyofthelucii.legacy;
 
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.nbt.NbtElement;
+import net.minecraft.nbt.NbtList;
+import ru.siyoga.legacyofthelucii.masquerade.MasqueradeMorph;
+
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+
 public final class LuciiPlayerState {
     private static final int DEFAULT_MAX_MANA = 100;
     private static final int DEFAULT_MANA_REGEN_INTERVAL = 20;
@@ -17,6 +27,21 @@ public final class LuciiPlayerState {
     private static final String ARDYN_OVERKILL_ACTIVE_KEY = "ArdynOverkillActive";
     private static final String REGEN_TIMER_KEY = "ManaRegenTimer";
     private static final String MANA_REGEN_DELAY_KEY = "ManaRegenDelay";
+    private static final String MASQUERADE_MORPHS_KEY = "MasqueradeMorphs";
+    private static final String MASQUERADE_ACTIVE_KEY = "MasqueradeActive";
+    private static final String MASQUERADE_TARGET_KEY = "MasqueradeTarget";
+    private static final String MASQUERADE_DATA_VERSION_KEY = "MasqueradeDataVersion";
+    private static final int MASQUERADE_DATA_VERSION = 1;
+    private static final Set<String> LEGACY_STARTER_MORPH_KEYS = Set.of(
+            "entity:minecraft:zombie",
+            "entity:minecraft:skeleton",
+            "entity:minecraft:creeper",
+            "entity:minecraft:enderman",
+            "entity:minecraft:spider",
+            "entity:minecraft:cow",
+            "entity:minecraft:wolf",
+            "entity:minecraft:villager"
+    );
     private static final int MAX_ARDYN_WARP_CHARGES = 12;
     private int mana = DEFAULT_MAX_MANA;
     private int maxMana = DEFAULT_MAX_MANA;
@@ -29,6 +54,9 @@ public final class LuciiPlayerState {
     private boolean ardynOverkillActive;
     private int regenTimer;
     private int manaRegenDelay;
+    private final Map<String, MasqueradeMorph> unlockedMorphs = new LinkedHashMap<>();
+    private MasqueradeMorph activeMorph;
+    private UUID masqueradeTargetUuid;
 
     public int mana() {
         return mana;
@@ -58,7 +86,54 @@ public final class LuciiPlayerState {
             royalArmsActive = false;
         }
         this.legacy = legacy;
+        if (legacy != LuciiLegacy.ARDYN) {
+            activeMorph = null;
+            masqueradeTargetUuid = null;
+        }
         this.mana = Math.max(mana, maxMana / 2);
+    }
+
+    public Collection<MasqueradeMorph> unlockedMorphs() {
+        return java.util.List.copyOf(unlockedMorphs.values());
+    }
+
+    public boolean unlockMorph(MasqueradeMorph morph) {
+        if (morph == null || unlockedMorphs.containsKey(morph.key())) {
+            return false;
+        }
+        unlockedMorphs.put(morph.key(), morph);
+        return true;
+    }
+
+    public MasqueradeMorph findUnlockedMorph(String key) {
+        return unlockedMorphs.get(key);
+    }
+
+    public MasqueradeMorph activeMorph() {
+        return activeMorph;
+    }
+
+    public boolean setActiveMorph(MasqueradeMorph morph) {
+        if (morph != null && !unlockedMorphs.containsKey(morph.key())) {
+            return false;
+        }
+        if (java.util.Objects.equals(activeMorph, morph)) {
+            return false;
+        }
+        activeMorph = morph;
+        return true;
+    }
+
+    public UUID masqueradeTargetUuid() {
+        return masqueradeTargetUuid;
+    }
+
+    public boolean setMasqueradeTargetUuid(UUID targetUuid) {
+        if (java.util.Objects.equals(masqueradeTargetUuid, targetUuid)) {
+            return false;
+        }
+        masqueradeTargetUuid = targetUuid;
+        return true;
     }
 
     public boolean hasLegacy() {
@@ -215,6 +290,24 @@ public final class LuciiPlayerState {
             regenTimer = Math.min(regenTimer, ARDYN_OVERKILL_MANA_REGEN_INTERVAL - 1);
             manaRegenDelay = 0;
         }
+
+        unlockedMorphs.clear();
+        NbtList morphList = nbt.getList(MASQUERADE_MORPHS_KEY, NbtElement.COMPOUND_TYPE);
+        for (int i = 0; i < morphList.size(); i++) {
+            MasqueradeMorph.fromNbt(morphList.getCompound(i)).ifPresent(this::unlockMorph);
+        }
+        if (nbt.getInt(MASQUERADE_DATA_VERSION_KEY) < MASQUERADE_DATA_VERSION) {
+            LEGACY_STARTER_MORPH_KEYS.forEach(unlockedMorphs::remove);
+        }
+        activeMorph = null;
+        if (legacy == LuciiLegacy.ARDYN && nbt.contains(MASQUERADE_ACTIVE_KEY, NbtElement.COMPOUND_TYPE)) {
+            MasqueradeMorph.fromNbt(nbt.getCompound(MASQUERADE_ACTIVE_KEY))
+                    .filter(morph -> unlockedMorphs.containsKey(morph.key()))
+                    .ifPresent(morph -> activeMorph = unlockedMorphs.get(morph.key()));
+        }
+        masqueradeTargetUuid = legacy == LuciiLegacy.ARDYN && nbt.containsUuid(MASQUERADE_TARGET_KEY)
+                ? nbt.getUuid(MASQUERADE_TARGET_KEY)
+                : null;
     }
     public void writeNbt(NbtCompound nbt) {
         nbt.putInt(MANA_KEY, mana);
@@ -228,6 +321,19 @@ public final class LuciiPlayerState {
         nbt.putBoolean(ARDYN_OVERKILL_ACTIVE_KEY, ardynOverkillActive);
         nbt.putInt(REGEN_TIMER_KEY, regenTimer);
         nbt.putInt(MANA_REGEN_DELAY_KEY, manaRegenDelay);
+
+        NbtList morphList = new NbtList();
+        for (MasqueradeMorph morph : unlockedMorphs.values()) {
+            morphList.add(morph.writeNbt());
+        }
+        nbt.put(MASQUERADE_MORPHS_KEY, morphList);
+        nbt.putInt(MASQUERADE_DATA_VERSION_KEY, MASQUERADE_DATA_VERSION);
+        if (activeMorph != null && legacy == LuciiLegacy.ARDYN) {
+            nbt.put(MASQUERADE_ACTIVE_KEY, activeMorph.writeNbt());
+        }
+        if (masqueradeTargetUuid != null && legacy == LuciiLegacy.ARDYN) {
+            nbt.putUuid(MASQUERADE_TARGET_KEY, masqueradeTargetUuid);
+        }
     }
     private int experienceForNextLevel() {
         return 50 + (level - 1) * 25;

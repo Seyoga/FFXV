@@ -11,6 +11,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import ru.siyoga.legacyofthelucii.client.royalarms.ardyn.ArdynShadowStepClient;
 import ru.siyoga.legacyofthelucii.client.royalarms.warp.RoyalArmsWarpTrailClient;
+import ru.siyoga.legacyofthelucii.client.masquerade.MasqueradeRenderer;
 
 @Mixin(EntityRenderDispatcher.class)
 public abstract class EntityRenderDispatcherMixin {
@@ -30,6 +31,22 @@ public abstract class EntityRenderDispatcherMixin {
         if (entity instanceof PlayerEntity player
                 && (RoyalArmsWarpTrailClient.shouldHidePlayer(player.getUuid())
                 || ArdynShadowStepClient.shouldHidePlayer(player.getUuid()))) {
+            ci.cancel();
+            return;
+        }
+        if (entity instanceof PlayerEntity player
+                && MasqueradeRenderer.renderWorldMorph(
+                (EntityRenderDispatcher) (Object) this,
+                player,
+                x,
+                y,
+                z,
+                yaw,
+                tickDelta,
+                matrices,
+                vertexConsumers,
+                light
+        )) {
             ci.cancel();
         }
     }

@@ -11,6 +11,7 @@ import net.minecraft.util.math.Vec3d;
 import org.joml.Vector3f;
 import ru.siyoga.legacyofthelucii.LegacyOfTheLucii;
 import ru.siyoga.legacyofthelucii.effect.Demonization;
+import ru.siyoga.legacyofthelucii.masquerade.MasqueradeManager;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -64,6 +65,7 @@ public final class DebugDemonizeAbility {
         );
 
         if (Demonization.isDemonized(target)) {
+            MasqueradeManager.unlockMorph(player, target);
             if (Demonization.getDemonizerUuid(target) == null) {
                 Demonization.assignDemonizer(target, player);
                 player.sendMessage(
@@ -97,6 +99,8 @@ public final class DebugDemonizeAbility {
             );
             return;
         }
+
+        MasqueradeManager.unlockMorph(player, target);
 
         Vec3d center = target.getBoundingBox().getCenter();
         world.spawnParticles(

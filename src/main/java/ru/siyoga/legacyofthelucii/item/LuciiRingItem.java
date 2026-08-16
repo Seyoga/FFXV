@@ -13,6 +13,8 @@ import ru.siyoga.legacyofthelucii.legacy.LuciiLegacy;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerState;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerStates;
 import ru.siyoga.legacyofthelucii.network.LuciiNetwork;
+import ru.siyoga.legacyofthelucii.network.MasqueradeNetwork;
+import ru.siyoga.legacyofthelucii.masquerade.MasqueradeManager;
 import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsWallAbility;
 
 import java.util.List;
@@ -30,11 +32,16 @@ public final class LuciiRingItem extends Item {
         ItemStack stack = user.getStackInHand(hand);
         if (!world.isClient) {
             LuciiPlayerState state = LuciiPlayerStates.get(user);
+            java.util.UUID previousMasqueradeTarget = state.masqueradeTargetUuid();
             state.unlockLegacy(unlocksLegacy);
             if (user instanceof net.minecraft.server.network.ServerPlayerEntity serverPlayer) {
                 RoyalArmsWallAbility.deactivate(serverPlayer, false);
                 LuciiNetwork.sendState(serverPlayer);
                 LuciiNetwork.broadcastRoyalArmsVisual(serverPlayer);
+                MasqueradeNetwork.clearObserverVisual(serverPlayer, previousMasqueradeTarget);
+                MasqueradeManager.clearIfUnavailable(serverPlayer);
+                MasqueradeNetwork.sendOwnerState(serverPlayer);
+                MasqueradeNetwork.sendObserverVisualState(serverPlayer);
             }
             if (!user.getAbilities().creativeMode) {
                 stack.decrement(1);

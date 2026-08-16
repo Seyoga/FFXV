@@ -45,5 +45,13 @@
   "key.legacyofthelucii.royal_arms.ardyn_point_warp": "Royal Arms: точечный варп Ардина",
   "key.legacyofthelucii.royal_arms.ardyn_dark_tornado": "Royal Arms: Тёмный торнадо Ардина",
   "key.legacyofthelucii.royal_arms.guard": "Royal Arms: фантомная защита",
-  "key.legacyofthelucii.skill_tree.open": "Открыть древо навыков Royal Arms"
+  "key.legacyofthelucii.skill_tree.open": "Открыть древо навыков Royal Arms",
+  "key.legacyofthelucii.masquerade.open": "Открыть Маскарад",
+  "screen.legacyofthelucii.masquerade": "Маскарад",
+  "screen.legacyofthelucii.masquerade.search": "Поиск...",
+  "message.legacyofthelucii.masquerade.requires_ardyn": "Маскарад доступен только Ардину.",
+  "message.legacyofthelucii.masquerade.requires_target": "Сначала выберите игрока, которого нужно обмануть.",
+  "message.legacyofthelucii.masquerade.target_player": "Наведитесь на игрока или моба, чтобы выбрать цель Маскарада.",
+  "message.legacyofthelucii.masquerade.target_too_far": "Цель слишком далеко.",
+  "message.legacyofthelucii.masquerade.invalid_target": "Эта сущность недоступна как цель Маскарада."
 }

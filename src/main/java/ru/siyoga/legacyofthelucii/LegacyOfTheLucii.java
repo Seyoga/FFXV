@@ -27,7 +27,9 @@ import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerStates;
 import ru.siyoga.legacyofthelucii.legacy.RoyalArmsInventoryFilter;
 import ru.siyoga.legacyofthelucii.network.ArdynOverkillNetwork;
 import ru.siyoga.legacyofthelucii.network.LuciiNetwork;
+import ru.siyoga.legacyofthelucii.network.MasqueradeNetwork;
 import ru.siyoga.legacyofthelucii.network.RoyalArmsGuardNetwork;
+import ru.siyoga.legacyofthelucii.masquerade.MasqueradeManager;
 import ru.siyoga.legacyofthelucii.particle.LegacyParticles;
 import ru.siyoga.legacyofthelucii.royalarms.ability.ArdynOverkillAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.ArdynShadowStepAbility;
@@ -51,6 +53,7 @@ public final class LegacyOfTheLucii implements ModInitializer {
         LegacyStatusEffects.register();
         LegacyParticles.register();
         LegacyItems.register();
+        MasqueradeNetwork.registerServer();
         ServerPlayNetworking.registerGlobalReceiver(ROYAL_ARMS_EQUIP_PACKET, LegacyOfTheLucii::handleRoyalArmsEquip);
         ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.ROYAL_ARMS_TOGGLE_PACKET, LegacyOfTheLucii::handleRoyalArmsToggle);
         ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.ROYAL_ARMS_FILTER_PACKET, LegacyOfTheLucii::handleRoyalArmsFilter);
@@ -114,6 +117,7 @@ public final class LegacyOfTheLucii implements ModInitializer {
                 state.tick();
             }
             ArdynOverkillAbility.tick(server);
+            MasqueradeManager.tick(server);
 
             if (server.getTicks() % 20 == 0) {
                 for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
@@ -134,6 +138,11 @@ public final class LegacyOfTheLucii implements ModInitializer {
                 LuciiPlayerState state = LuciiPlayerStates.get(player);
                 if (state.hasLegacy()) {
                     state.addExperience(5);
+                }
+                if (player instanceof ServerPlayerEntity ardyn
+                        && killedEntity instanceof ServerPlayerEntity killedPlayer
+                        && state.legacy() == ru.siyoga.legacyofthelucii.legacy.LuciiLegacy.ARDYN) {
+                    MasqueradeManager.unlockMorph(ardyn, killedPlayer.getGameProfile());
                 }
             }
         });
