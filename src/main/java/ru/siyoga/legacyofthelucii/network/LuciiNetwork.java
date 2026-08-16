@@ -15,13 +15,15 @@ import ru.siyoga.legacyofthelucii.LegacyOfTheLucii;
 import ru.siyoga.legacyofthelucii.legacy.LuciiLegacy;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerState;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerStates;
-import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsInventoryItems;
+import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsOrbitDamageAbility;
+import ru.siyoga.legacyofthelucii.royalarms.orbit.RoyalArmsOrbitState;
 import java.util.List;
 public final class LuciiNetwork {
     public static final Identifier STATE_SYNC_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "state_sync");
     public static final Identifier ROYAL_ARMS_TOGGLE_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "royal_arms_toggle");
     public static final Identifier ROYAL_ARMS_FILTER_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "royal_arms_filter");
     public static final Identifier ROYAL_ARMS_VISUAL_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "royal_arms_visual");
+    public static final Identifier ROYAL_ARMS_ORBIT_STATE_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "royal_arms_orbit_state");
     public static final Identifier ROYAL_ARMS_WALL_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "royal_arms_wall");
     public static final Identifier ROYAL_ARMS_WARP_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "royal_arms_warp");
     public static final Identifier ROYAL_ARMS_WARP_TRAIL_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "royal_arms_warp_trail");
@@ -64,6 +66,20 @@ public final class LuciiNetwork {
 
         for (ServerPlayerEntity viewer : server.getPlayerManager().getPlayerList()) {
             ServerPlayNetworking.send(viewer, ROYAL_ARMS_VISUAL_PACKET, createRoyalArmsVisualPacket(owner));
+        }
+    }
+    public static void broadcastRoyalArmsOrbitState(ServerPlayerEntity owner) {
+        MinecraftServer server = owner.getServer();
+        if (server == null) {
+            return;
+        }
+
+        RoyalArmsOrbitState.Snapshot snapshot = RoyalArmsOrbitDamageAbility.snapshot(owner);
+        for (ServerPlayerEntity viewer : server.getPlayerManager().getPlayerList()) {
+            PacketByteBuf buf = PacketByteBufs.create();
+            buf.writeUuid(owner.getUuid());
+            writeOrbitMotion(buf, snapshot);
+            ServerPlayNetworking.send(viewer, ROYAL_ARMS_ORBIT_STATE_PACKET, buf);
         }
     }
     public static void broadcastRoyalArmsWallAnimation(
@@ -175,11 +191,29 @@ public final class LuciiNetwork {
         }
         buf.writeString(state.legacy().id());
         buf.writeVarInt(state.ardynWarpCharges());
-        List<ItemStack> stacks = RoyalArmsInventoryItems.collect(owner);
-        buf.writeVarInt(stacks.size());
-        for (ItemStack stack : stacks) {
-            buf.writeItemStack(stack);
+        RoyalArmsOrbitState.Snapshot snapshot = RoyalArmsOrbitDamageAbility.snapshot(owner);
+        writeOrbitMotion(buf, snapshot);
+        buf.writeVarInt(snapshot.slots().size());
+        for (RoyalArmsOrbitState.SlotSnapshot slot : snapshot.slots()) {
+            buf.writeString(slot.key());
+            buf.writeVarInt(slot.sourceSlot());
+            buf.writeItemStack(slot.stack());
+            buf.writeVarInt(slot.index());
+            buf.writeFloat(slot.baseAngle());
+            buf.writeFloat(slot.targetBaseAngle());
+            buf.writeFloat(slot.innerProgress());
+            buf.writeBoolean(slot.innerTarget());
+            buf.writeVarInt(slot.spawnTicks());
         }
         return buf;
+    }
+
+    private static void writeOrbitMotion(PacketByteBuf buf, RoyalArmsOrbitState.Snapshot snapshot) {
+        buf.writeLong(snapshot.serverWorldTime());
+        buf.writeDouble(snapshot.previousPhase());
+        buf.writeDouble(snapshot.phase());
+        buf.writeFloat(snapshot.speed());
+        buf.writeBoolean(snapshot.paused());
+        buf.writeVarInt(snapshot.activeTicks());
     }
 }

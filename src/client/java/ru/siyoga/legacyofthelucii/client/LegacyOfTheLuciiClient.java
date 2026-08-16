@@ -35,6 +35,7 @@ import ru.siyoga.legacyofthelucii.legacy.LuciiLegacy;
 import ru.siyoga.legacyofthelucii.network.ArdynOverkillNetwork;
 import ru.siyoga.legacyofthelucii.network.LuciiNetwork;
 import ru.siyoga.legacyofthelucii.network.RoyalArmsGuardNetwork;
+import ru.siyoga.legacyofthelucii.royalarms.orbit.RoyalArmsOrbitState;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -87,27 +88,48 @@ public final class LegacyOfTheLuciiClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(LuciiNetwork.ROYAL_ARMS_VISUAL_PACKET, (client, handler, buf, responseSender) -> {
             UUID ownerUuid = buf.readUuid();
             boolean active = buf.readBoolean();
-            LuciiLegacy legacy = LuciiLegacy.NONE;
-            List<ItemStack> stacks = List.of();
             if (active) {
-                legacy = LuciiLegacy.byId(buf.readString());
+                LuciiLegacy legacy = LuciiLegacy.byId(buf.readString());
                 int ardynWarpCharges = buf.readVarInt();
+                RoyalArmsOrbitState.Snapshot motion = readOrbitMotion(buf);
                 int count = buf.readVarInt();
-                List<ItemStack> receivedStacks = new ArrayList<>(count);
+                List<RoyalArmsOrbitState.SlotSnapshot> slots = new ArrayList<>(count);
                 for (int i = 0; i < count; i++) {
-                    receivedStacks.add(buf.readItemStack());
+                    slots.add(new RoyalArmsOrbitState.SlotSnapshot(
+                            buf.readString(),
+                            buf.readVarInt(),
+                            buf.readItemStack(),
+                            buf.readVarInt(),
+                            buf.readFloat(),
+                            buf.readFloat(),
+                            buf.readFloat(),
+                            buf.readBoolean(),
+                            buf.readVarInt()
+                    ));
                 }
-                stacks = receivedStacks;
-                int visualArdynWarpCharges = ardynWarpCharges;
-                LuciiLegacy visualLegacy = legacy;
-                List<ItemStack> visualStacks = stacks;
-                client.execute(() -> RoyalArmsAbility.updateRemoteVisual(ownerUuid, active, visualLegacy, visualStacks, visualArdynWarpCharges));
+                RoyalArmsOrbitState.Snapshot snapshot = withSlots(motion, slots);
+                client.execute(() -> RoyalArmsAbility.updateRemoteVisual(
+                        ownerUuid,
+                        true,
+                        legacy,
+                        snapshot,
+                        ardynWarpCharges
+                ));
                 return;
             }
 
-            LuciiLegacy visualLegacy = legacy;
-            List<ItemStack> visualStacks = stacks;
-            client.execute(() -> RoyalArmsAbility.updateRemoteVisual(ownerUuid, active, visualLegacy, visualStacks, 0));
+            client.execute(() -> RoyalArmsAbility.updateRemoteVisual(
+                    ownerUuid,
+                    false,
+                    LuciiLegacy.NONE,
+                    RoyalArmsOrbitState.Snapshot.empty(0L),
+                    0
+            ));
+        });
+        ClientPlayNetworking.registerGlobalReceiver(LuciiNetwork.ROYAL_ARMS_ORBIT_STATE_PACKET, (client, handler, buf, responseSender) -> {
+            UUID ownerUuid = buf.readUuid();
+            RoyalArmsOrbitState.Snapshot motion = readOrbitMotion(buf);
+            client.execute(() -> RoyalArmsAbility.updateOrbitMotion(ownerUuid, motion));
         });
         ClientPlayNetworking.registerGlobalReceiver(LuciiNetwork.ROYAL_ARMS_WALL_ANIMATION_PACKET, (client, handler, buf, responseSender) -> {
             UUID ownerUuid = buf.readUuid();
@@ -207,5 +229,32 @@ public final class LegacyOfTheLuciiClient implements ClientModInitializer {
         MasqueradeTargetMarkerClient.register();
         EntityRendererRegistry.register(LegacyEntities.ARDYN_BARRAGE_WEAPON, ArdynBarrageWeaponRenderer::new);
         BlockEntityRendererFactories.register(LegacyBlocks.ROYAL_ARMS_WALL_BLOCK_ENTITY, RoyalArmsWallBlockEntityRenderer::new);
+    }
+
+    private static RoyalArmsOrbitState.Snapshot readOrbitMotion(net.minecraft.network.PacketByteBuf buf) {
+        return new RoyalArmsOrbitState.Snapshot(
+                buf.readLong(),
+                buf.readDouble(),
+                buf.readDouble(),
+                buf.readFloat(),
+                buf.readBoolean(),
+                buf.readVarInt(),
+                List.of()
+        );
+    }
+
+    private static RoyalArmsOrbitState.Snapshot withSlots(
+            RoyalArmsOrbitState.Snapshot motion,
+            List<RoyalArmsOrbitState.SlotSnapshot> slots
+    ) {
+        return new RoyalArmsOrbitState.Snapshot(
+                motion.serverWorldTime(),
+                motion.previousPhase(),
+                motion.phase(),
+                motion.speed(),
+                motion.paused(),
+                motion.activeTicks(),
+                List.copyOf(slots)
+        );
     }
 }

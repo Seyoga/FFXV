@@ -1,7 +1,6 @@
 package ru.siyoga.legacyofthelucii.client.royalarms;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,19 +42,21 @@ import ru.siyoga.legacyofthelucii.client.state.ClientLuciiState;
 import ru.siyoga.legacyofthelucii.legacy.LuciiLegacy;
 import ru.siyoga.legacyofthelucii.legacy.RoyalArmsInventoryFilter;
 import ru.siyoga.legacyofthelucii.network.LuciiNetwork;
+import ru.siyoga.legacyofthelucii.royalarms.orbit.RoyalArmsOrbitMath;
+import ru.siyoga.legacyofthelucii.royalarms.orbit.RoyalArmsOrbitState;
 
 public final class RoyalArmsAbility {
-    private static final double RADIUS = 2.5D;
-    private static final double INNER_RADIUS = 1.45D;
-    private static final double ORBIT_Y_OFFSET = 1.0D;
-    private static final double BOB_HEIGHT = 0.3D;
+    private static final double RADIUS = RoyalArmsOrbitMath.RADIUS;
+    private static final double INNER_RADIUS = RoyalArmsOrbitMath.INNER_RADIUS;
+    private static final double ORBIT_Y_OFFSET = RoyalArmsOrbitMath.ORBIT_Y_OFFSET;
+    private static final double BOB_HEIGHT = RoyalArmsOrbitMath.BOB_HEIGHT;
     private static final float ITEM_BASE_SCALE = 1.0F;
     private static final float TARGET_ITEM_SCALE = 1.48F;
-    private static final float NORMAL_ORBIT_SPEED = 2.0F;
-    private static final float FAST_ORBIT_SPEED = 5.0F;
-    private static final float ARDYN_INNER_RING_SPEED_MULTIPLIER = 1.65F;
+    private static final float NORMAL_ORBIT_SPEED = RoyalArmsOrbitMath.NORMAL_ORBIT_SPEED;
+    private static final float FAST_ORBIT_SPEED = RoyalArmsOrbitMath.FAST_ORBIT_SPEED;
+    private static final float ARDYN_INNER_RING_SPEED_MULTIPLIER = RoyalArmsOrbitMath.ARDYN_INNER_RING_SPEED_MULTIPLIER;
     private static final float ITEM_SPIN_SPEED = 3.0F;
-    private static final int APPEAR_TICKS = 24;
+    private static final int APPEAR_TICKS = RoyalArmsOrbitMath.APPEAR_TICKS;
     private static final int DISAPPEAR_TICKS = 24;
     private static final int INVENTORY_REFRESH_TICKS = 10;
     private static final int ATTACK_EQUIP_COOLDOWN_TICKS = 5;
@@ -104,14 +105,11 @@ public final class RoyalArmsAbility {
     private static FloatingItem targetedItem;
     private static int attackEquipCooldown;
     private static int toggleLockTicks;
-    private static float previousOrbitTime;
     private static float orbitTime;
     private static float previousItemSpinAngle;
     private static float itemSpinAngle;
     private static boolean initialAuraAppearance;
-    private static boolean wasSneaking;
-    private static boolean orbitPausedByDoubleSneak;
-    private static int sneakDoubleTapTicks;
+    private static RoyalArmsOrbitState.Snapshot localOrbitSnapshot = RoyalArmsOrbitState.Snapshot.empty(0L);
 
     private RoyalArmsAbility() {
     }
@@ -187,7 +185,7 @@ public final class RoyalArmsAbility {
         tickRemoteVisuals();
         tickGuardFormationProgress(client);
         advanceGuardLayerBoosts();
-        tickRemoteExplosionEffects(client.player == null ? null : client.player.getUuid());
+        tickExplosionGuardEffects();
 
         if (client.player != null && client.world != null && (active || hasClosingLocalItems())) {
             updateLocalPlayerPosition(client);
@@ -197,20 +195,12 @@ public final class RoyalArmsAbility {
             return;
         }
 
-        updateOrbitSpeedState(client);
-        previousOrbitTime = orbitTime;
         previousItemSpinAngle = itemSpinAngle;
         UUID localOwnerUuid = client.player.getUuid();
-        float normalOrbitSpeed = currentOrbitSpeed(client);
-        boolean explosionActive = explosionGuardOrbits.containsKey(localOwnerUuid);
-        float orbitDelta = advanceLocalExplosionGuardOrbit(localOwnerUuid, normalOrbitSpeed);
+        applyLocalOrbitPrediction(client.world.getTime());
+        float normalOrbitSpeed = localOrbitSnapshot.speed();
         float layerMotion = maxGuardLayerMotion(localOwnerUuid);
-
-        if (!initialAuraAppearance || explosionActive) {
-            orbitTime += orbitDelta;
-        }
-
-        float visualMotion = Math.max(Math.abs(orbitDelta), layerMotion);
+        float visualMotion = Math.max(Math.abs(normalOrbitSpeed), layerMotion);
         if (visualMotion > 0.001F) {
             float spinMultiplier = MathHelper.clamp(
                     visualMotion / Math.max(1.0F, normalOrbitSpeed),
@@ -237,30 +227,12 @@ public final class RoyalArmsAbility {
         }
 
         float time = orbitTime;
-        int charges = ClientLuciiState.ardynWarpCharges();
         for (FloatingItem item : floatingItems) {
             if (item.closing) {
                 continue;
             }
 
-            item.innerTarget = shouldUseArdynInnerRing(ClientLuciiState.legacy(), charges, item.index, floatingItems.size());
-            item.innerProgress = MathHelper.lerp(0.12F, item.innerProgress, item.innerTarget ? 1.0F : 0.0F);
-            float normalTargetAngle = getRingAngleDegrees(
-                    ClientLuciiState.legacy(),
-                    charges,
-                    item.index,
-                    floatingItems.size()
-            );
-            float guardTargetAngle = getGuardRingAngleDegrees(item.index, floatingItems.size());
-            item.targetAngle = lerpAngleDegrees(
-                    normalTargetAngle,
-                    guardTargetAngle,
-                    localGuardFormationProgress
-            );
-            float diff = MathHelper.wrapDegrees(item.targetAngle - item.angle);
-            item.angle += diff * 0.18F;
             item.highlightScale = MathHelper.lerp(0.16F, item.highlightScale, item == targetedItem ? TARGET_ITEM_SCALE : 1.0F);
-            item.spawnTicks = Math.min(APPEAR_TICKS, item.spawnTicks + 1);
         }
         if (initialAuraAppearance
                 && floatingItems.stream().noneMatch(FloatingItem::isAppearing)) {
@@ -276,42 +248,58 @@ public final class RoyalArmsAbility {
 
     }
 
-    private static void updateOrbitSpeedState(MinecraftClient client) {
-        boolean sneaking = client.player != null && client.player.isSneaking();
-        if (sneaking && !wasSneaking) {
-            if (sneakDoubleTapTicks > 0) {
-                orbitPausedByDoubleSneak = true;
-                sneakDoubleTapTicks = 0;
-            } else {
-                sneakDoubleTapTicks = 8;
-            }
-        }
-
-        if (!sneaking && wasSneaking) {
-            orbitPausedByDoubleSneak = false;
-        }
-
-        if (sneakDoubleTapTicks > 0) {
-            sneakDoubleTapTicks--;
-        }
-
-        wasSneaking = sneaking;
-    }
-
     private static float currentOrbitSpeed(MinecraftClient client) {
-        if (client.player == null) {
-            return FAST_ORBIT_SPEED;
-        }
-
-        if (orbitPausedByDoubleSneak && client.player.isSneaking()) {
-            return 0.0F;
-        }
-
-        return client.player.isSneaking() ? NORMAL_ORBIT_SPEED : FAST_ORBIT_SPEED;
+        return localOrbitSnapshot.speed();
     }
 
     private static float remoteOrbitSpeed(AbstractClientPlayerEntity player) {
         return player.isSneaking() ? NORMAL_ORBIT_SPEED : FAST_ORBIT_SPEED;
+    }
+
+    private static void applyLocalOrbitPrediction(double worldTime) {
+        double elapsed = snapshotElapsed(localOrbitSnapshot, worldTime);
+        orbitTime = (float) predictedPhase(localOrbitSnapshot, worldTime);
+        for (FloatingItem item : floatingItems) {
+            RoyalArmsOrbitState.SlotSnapshot slot = findSlot(localOrbitSnapshot, item.key);
+            if (slot != null) {
+                item.applySlot(slot, elapsed);
+            }
+        }
+    }
+
+    private static double predictedPhase(RoyalArmsOrbitState.Snapshot snapshot, double worldTime) {
+        return snapshot.phase() + snapshot.speed() * snapshotElapsed(snapshot, worldTime);
+    }
+
+    private static double snapshotElapsed(RoyalArmsOrbitState.Snapshot snapshot, double worldTime) {
+        return Math.max(0.0D, worldTime - snapshot.serverWorldTime());
+    }
+
+    private static RoyalArmsOrbitState.SlotSnapshot findSlot(
+            RoyalArmsOrbitState.Snapshot snapshot,
+            String key
+    ) {
+        for (RoyalArmsOrbitState.SlotSnapshot slot : snapshot.slots()) {
+            if (slot.key().equals(key)) {
+                return slot;
+            }
+        }
+        return null;
+    }
+
+    private static RoyalArmsOrbitState.Snapshot mergeMotion(
+            RoyalArmsOrbitState.Snapshot motion,
+            List<RoyalArmsOrbitState.SlotSnapshot> slots
+    ) {
+        return new RoyalArmsOrbitState.Snapshot(
+                motion.serverWorldTime(),
+                motion.previousPhase(),
+                motion.phase(),
+                motion.speed(),
+                motion.paused(),
+                motion.activeTicks(),
+                slots
+        );
     }
 
     private static boolean onPreAttack(MinecraftClient client, net.minecraft.client.network.ClientPlayerEntity player, int clickCount) {
@@ -349,7 +337,7 @@ public final class RoyalArmsAbility {
 
         Vec3d cameraPos = context.camera().getPos();
         float tickDelta = client.isPaused() ? 0.0F : context.tickDelta();
-        float time = MathHelper.lerp(tickDelta, previousOrbitTime, orbitTime);
+        float time = (float) predictedPhase(localOrbitSnapshot, client.world.getTime() + tickDelta);
         float spinAngle = lerpAngleDegrees(previousItemSpinAngle, itemSpinAngle, tickDelta);
         float spinTime = client.world.getTime() + tickDelta;
         float localGuardProgress = MathHelper.lerp(
@@ -368,7 +356,9 @@ public final class RoyalArmsAbility {
             int total = floatingItems.size();
             for (FloatingItem item : floatingItems) {
                 int layer = guardLayerForIndex(item.index);
-                float itemTime = time + interpolatedGuardLayerOffset(
+                float itemTime = time
+                        + interpolatedRemoteExplosionOrbitOffset(ownerUuid, tickDelta) * localGuardProgress
+                        + interpolatedGuardLayerOffset(
                         ownerUuid,
                         layer,
                         tickDelta
@@ -480,8 +470,8 @@ public final class RoyalArmsAbility {
 
             Vec3d playerPos = getInterpolatedPlayerPos(owner, tickDelta);
             UUID ownerUuid = entry.getKey();
-            float baseTime = spinTime * remoteOrbitSpeed(owner)
-                    + interpolatedRemoteExplosionOrbitOffset(ownerUuid, tickDelta);
+            double renderWorldTime = client.world.getTime() + tickDelta;
+            float baseTime = (float) predictedPhase(visual.snapshot, renderWorldTime);
             float guardProgress = interpolatedRemoteGuardFormationProgress(
                     ownerUuid,
                     tickDelta
@@ -489,17 +479,18 @@ public final class RoyalArmsAbility {
             int total = visual.items.size();
             LegacyPalette palette = LegacyPalette.forLegacy(visual.legacy);
             for (int i = 0; i < total; i++) {
-                int index = i + 1;
+                RemoteFloatingItem item = visual.items.get(i);
+                item.applyPrediction(visual.snapshot, renderWorldTime);
+                int index = item.index;
                 int layer = guardLayerForIndex(index);
-                float itemTime = baseTime + interpolatedGuardLayerOffset(
+                float itemTime = baseTime
+                        + interpolatedRemoteExplosionOrbitOffset(ownerUuid, tickDelta) * guardProgress
+                        + interpolatedGuardLayerOffset(
                         ownerUuid,
                         layer,
                         tickDelta
                 ) * guardProgress;
-                ItemStack stack = visual.items.get(i).stack;
-                RemoteFloatingItem item = visual.items.get(i);
-                item.innerTarget = shouldUseArdynInnerRing(visual.legacy, visual.ardynWarpCharges, index, total);
-                item.innerProgress = MathHelper.lerp(0.12F, item.innerProgress, item.innerTarget ? 1.0F : 0.0F);
+                ItemStack stack = item.stack;
                 Vec3d itemPos = getRemoteItemPosition(
                         item,
                         index,
@@ -537,27 +528,33 @@ public final class RoyalArmsAbility {
             return;
         }
 
+        synchronizeLocalItems(localOrbitSnapshot);
+        lastSelectedSlot = client.player.getInventory().selectedSlot;
+    }
+
+    private static void synchronizeLocalItems(RoyalArmsOrbitState.Snapshot snapshot) {
         List<FloatingItem> previous = new ArrayList<>(floatingItems);
         floatingItems.clear();
-        lastSelectedSlot = client.player.getInventory().selectedSlot;
 
-        List<InventoryItem> inventoryItems = collectFilteredInventory(client);
-        int total = inventoryItems.size();
-        LuciiLegacy legacy = ClientLuciiState.legacy();
-        int charges = ClientLuciiState.ardynWarpCharges();
-        for (int i = 0; i < total; i++) {
-            InventoryItem inventoryItem = inventoryItems.get(i);
-            int index = i + 1;
-            float angle = getRingAngleDegrees(legacy, charges, index, total);
-            FloatingItem existing = findByKey(previous, inventoryItem.key);
+        for (RoyalArmsOrbitState.SlotSnapshot slot : snapshot.slots()) {
+            FloatingItem existing = findByKey(previous, slot.key());
             FloatingItem floatingItem;
             if (existing == null) {
-                floatingItem = new FloatingItem(inventoryItem.key, inventoryItem.slot, inventoryItem.stack, angle, index);
-                floatingItem.innerTarget = shouldUseArdynInnerRing(legacy, charges, index, total);
-                floatingItem.innerProgress = floatingItem.innerTarget ? 1.0F : 0.0F;
+                floatingItem = new FloatingItem(
+                        slot.key(),
+                        slot.sourceSlot(),
+                        slot.stack().copyWithCount(slot.stack().getCount()),
+                        slot.baseAngle(),
+                        slot.index()
+                );
             } else {
-                floatingItem = existing.update(inventoryItem.stack, angle, index);
+                floatingItem = existing.update(
+                        slot.stack().copyWithCount(slot.stack().getCount()),
+                        slot.targetBaseAngle(),
+                        slot.index()
+                );
             }
+            floatingItem.applySlot(slot, 0.0D);
             floatingItems.add(floatingItem);
         }
 
@@ -576,26 +573,6 @@ public final class RoyalArmsAbility {
         return null;
     }
 
-    private static List<InventoryItem> collectFilteredInventory(MinecraftClient client) {
-        List<InventoryItem> items = new ArrayList<>();
-        int selectedSlot = client.player.getInventory().selectedSlot;
-
-        for (int slot = 0; slot < client.player.getInventory().main.size(); slot++) {
-            ItemStack stack = client.player.getInventory().main.get(slot);
-            if (slot != selectedSlot && !stack.isEmpty() && currentFilter.matches(stack)) {
-                items.add(new InventoryItem("main:" + slot, slot, stack.copyWithCount(stack.getCount())));
-            }
-        }
-
-        ItemStack offhandStack = client.player.getOffHandStack();
-        if (!offhandStack.isEmpty() && currentFilter.matches(offhandStack)) {
-            items.add(new InventoryItem("offhand", -1, offhandStack.copyWithCount(offhandStack.getCount())));
-        }
-
-        items.sort(Comparator.comparingInt(item -> item.slot));
-        return items;
-    }
-
     private static Vec3d getItemPosition(
             FloatingItem item,
             Vec3d playerPos,
@@ -610,9 +587,23 @@ public final class RoyalArmsAbility {
                 ? MathHelper.clamp(guardProgress, 0.0F, 1.0F)
                 : 0.0F;
         float direction = item.innerTarget ? -ARDYN_INNER_RING_SPEED_MULTIPLIER : 1.0F;
+        float normalAnimationAngle = item.angle + time * direction;
+        if (!item.closing && effectiveGuardProgress <= 0.0F) {
+            return RoyalArmsOrbitMath.position(
+                    playerPos,
+                    item.index,
+                    time,
+                    item.angle,
+                    item.innerProgress,
+                    item.innerTarget,
+                    item.linearAppearanceProgress(tickDelta)
+            );
+        }
+
+        float guardAnimationAngle = getGuardRingAngleDegrees(item.index, total) + time * direction;
         float animationAngle = item.closing
                 ? item.closeAngle
-                : item.angle + time * direction;
+                : lerpAngleDegrees(normalAnimationAngle, guardAnimationAngle, effectiveGuardProgress);
         double angle = Math.toRadians(animationAngle);
         double normalRingRadius = MathHelper.lerp(
                 item.innerProgress,
@@ -662,16 +653,25 @@ public final class RoyalArmsAbility {
                 ? MathHelper.clamp(guardProgress, 0.0F, 1.0F)
                 : 0.0F;
         float direction = item.innerTarget ? -ARDYN_INNER_RING_SPEED_MULTIPLIER : 1.0F;
-        float normalBaseAngle = getRingAngleDegrees(legacy, charges, index, total);
-        float guardBaseAngle = getGuardRingAngleDegrees(index, total);
-        float baseAngle = lerpAngleDegrees(
-                normalBaseAngle,
-                guardBaseAngle,
-                effectiveGuardProgress
-        );
+        float normalAnimationAngle = item.angle + time * direction;
+        if (item.closeTicks <= 0 && effectiveGuardProgress <= 0.0F) {
+            item.lastRenderedAngle = normalAnimationAngle;
+            item.lastRenderedTime = time;
+            return RoyalArmsOrbitMath.position(
+                    playerPos,
+                    index,
+                    time,
+                    item.angle,
+                    item.innerProgress,
+                    item.innerTarget,
+                    item.linearAppearanceProgress(tickDelta)
+            );
+        }
+
+        float guardAnimationAngle = getGuardRingAngleDegrees(index, total) + time * direction;
         float animationAngle = item.closeTicks > 0
                 ? item.closeAngle
-                : baseAngle + time * direction;
+                : lerpAngleDegrees(normalAnimationAngle, guardAnimationAngle, effectiveGuardProgress);
         item.lastRenderedAngle = animationAngle;
         item.lastRenderedTime = time;
 
@@ -905,14 +905,10 @@ public final class RoyalArmsAbility {
         lastPlayerPos = null;
         currentPlayerPos = null;
         lastSelectedSlot = -1;
-        previousOrbitTime = 0.0F;
         orbitTime = 0.0F;
         previousItemSpinAngle = 0.0F;
         itemSpinAngle = 0.0F;
         initialAuraAppearance = false;
-        wasSneaking = false;
-        orbitPausedByDoubleSneak = false;
-        sneakDoubleTapTicks = 0;
     }
 
     public static void beginGuardBlock(
@@ -947,7 +943,8 @@ public final class RoyalArmsAbility {
             float targetAngle = guardAngleDegrees(interceptPos, playerPos);
             List<Float> itemAngles = new ArrayList<>();
             int total = floatingItems.size();
-            float layerOffset = currentGuardLayerOffset(ownerUuid, layer)
+            float layerOffset = (remoteExplosionOrbitOffsets.getOrDefault(ownerUuid, 0.0F)
+                    + currentGuardLayerOffset(ownerUuid, layer))
                     * localGuardFormationProgress;
             for (FloatingItem item : floatingItems) {
                 if (item.closing || guardLayerForIndex(item.index) != layer) {
@@ -985,26 +982,29 @@ public final class RoyalArmsAbility {
         }
 
         Vec3d playerPos = owner.getPos();
-        float normalSpeed = remoteOrbitSpeed(owner);
-        float baseTime = client.world.getTime() * normalSpeed
-                + remoteExplosionOrbitOffsets.getOrDefault(ownerUuid, 0.0F);
+        float normalSpeed = visual.snapshot.speed();
+        double worldTime = client.world.getTime();
+        float baseTime = (float) predictedPhase(visual.snapshot, worldTime);
         float guardProgress = remoteGuardFormationProgress.getOrDefault(
                 ownerUuid,
                 0.0F
         );
-        float layerOffset = currentGuardLayerOffset(ownerUuid, layer)
+        float layerOffset = (remoteExplosionOrbitOffsets.getOrDefault(ownerUuid, 0.0F)
+                + currentGuardLayerOffset(ownerUuid, layer))
                 * guardProgress;
         float targetAngle = guardAngleDegrees(interceptPos, playerPos);
         List<Float> itemAngles = new ArrayList<>();
         int total = visual.items.size();
         for (int i = 0; i < total; i++) {
-            int index = i + 1;
+            RemoteFloatingItem remoteItem = visual.items.get(i);
+            remoteItem.applyPrediction(visual.snapshot, worldTime);
+            int index = remoteItem.index;
             if (guardLayerForIndex(index) != layer) {
                 continue;
             }
 
             Vec3d itemPos = getRemoteItemPosition(
-                    visual.items.get(i),
+                    remoteItem,
                     index,
                     playerPos,
                     baseTime + layerOffset,
@@ -1103,6 +1103,13 @@ public final class RoyalArmsAbility {
                 localGuardFormationProgress,
                 localTarget ? 1.0F : 0.0F
         );
+        if (!localTarget && localGuardFormationProgress == 0.0F && client.player != null) {
+            UUID ownerUuid = client.player.getUuid();
+            guardLayerOffsets.remove(ownerUuid);
+            previousGuardLayerOffsets.remove(ownerUuid);
+            remoteExplosionOrbitOffsets.remove(ownerUuid);
+            previousRemoteExplosionOrbitOffsets.remove(ownerUuid);
+        }
 
         previousRemoteGuardFormationProgress.clear();
         previousRemoteGuardFormationProgress.putAll(remoteGuardFormationProgress);
@@ -1116,10 +1123,14 @@ public final class RoyalArmsAbility {
                     ownerUuid,
                     0.0F
             );
-            remoteGuardFormationProgress.put(
-                    ownerUuid,
-                    approachGuardProgress(current, target ? 1.0F : 0.0F)
-            );
+            float next = approachGuardProgress(current, target ? 1.0F : 0.0F);
+            remoteGuardFormationProgress.put(ownerUuid, next);
+            if (!target && next == 0.0F) {
+                guardLayerOffsets.remove(ownerUuid);
+                previousGuardLayerOffsets.remove(ownerUuid);
+                remoteExplosionOrbitOffsets.remove(ownerUuid);
+                previousRemoteExplosionOrbitOffsets.remove(ownerUuid);
+            }
         }
     }
 
@@ -1175,23 +1186,7 @@ public final class RoyalArmsAbility {
         return maximum;
     }
 
-    private static float advanceLocalExplosionGuardOrbit(
-            UUID ownerUuid,
-            float normalSpeed
-    ) {
-        ExplosionGuardOrbit state = explosionGuardOrbits.get(ownerUuid);
-        if (state == null) {
-            return normalSpeed;
-        }
-
-        float delta = state.advance(normalSpeed);
-        if (state.finished()) {
-            explosionGuardOrbits.remove(ownerUuid);
-        }
-        return delta;
-    }
-
-    private static void tickRemoteExplosionEffects(UUID selfUuid) {
+    private static void tickExplosionGuardEffects() {
         previousRemoteExplosionOrbitOffsets.clear();
         previousRemoteExplosionOrbitOffsets.putAll(remoteExplosionOrbitOffsets);
 
@@ -1200,17 +1195,17 @@ public final class RoyalArmsAbility {
         for (Map.Entry<UUID, ExplosionGuardOrbit> entry
                 : new ArrayList<>(explosionGuardOrbits.entrySet())) {
             UUID ownerUuid = entry.getKey();
-            if (ownerUuid.equals(selfUuid)) {
-                continue;
-            }
-
             AbstractClientPlayerEntity owner = findPlayer(client, ownerUuid);
             if (owner == null) {
                 finished.add(ownerUuid);
                 continue;
             }
 
-            float normalSpeed = remoteOrbitSpeed(owner);
+            RemoteRoyalArmsVisual visual = remoteVisuals.get(ownerUuid);
+            boolean localOwner = client.player != null && ownerUuid.equals(client.player.getUuid());
+            float normalSpeed = localOwner
+                    ? localOrbitSnapshot.speed()
+                    : visual == null ? remoteOrbitSpeed(owner) : visual.snapshot.speed();
             float desiredDelta = entry.getValue().advance(normalSpeed);
             remoteExplosionOrbitOffsets.merge(
                     ownerUuid,
@@ -1388,9 +1383,21 @@ public final class RoyalArmsAbility {
     }
     // END PHANTOM_GUARD_THREE_LAYER_V7 METHODS
 
-    public static void updateRemoteVisual(UUID ownerUuid, boolean active, LuciiLegacy legacy, List<ItemStack> stacks, int ardynWarpCharges) {
+    public static void updateRemoteVisual(
+            UUID ownerUuid,
+            boolean active,
+            LuciiLegacy legacy,
+            RoyalArmsOrbitState.Snapshot snapshot,
+            int ardynWarpCharges
+    ) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        boolean localOwner = client.player != null && ownerUuid.equals(client.player.getUuid());
         if (!active || legacy == LuciiLegacy.NONE) {
             clearGuardCombatEffects(ownerUuid);
+            if (localOwner) {
+                localOrbitSnapshot = RoyalArmsOrbitState.Snapshot.empty(0L);
+                return;
+            }
             RemoteRoyalArmsVisual existing = remoteVisuals.get(ownerUuid);
             if (existing == null) {
                 return;
@@ -1407,21 +1414,44 @@ public final class RoyalArmsAbility {
             return;
         }
 
+        if (localOwner) {
+            localOrbitSnapshot = snapshot;
+            synchronizeLocalItems(snapshot);
+            applyLocalOrbitPrediction(client.world == null ? snapshot.serverWorldTime() : client.world.getTime());
+            return;
+        }
+
         RemoteRoyalArmsVisual previous = remoteVisuals.get(ownerUuid);
-        List<RemoteFloatingItem> copiedStacks = new ArrayList<>(stacks.size());
-        for (ItemStack stack : stacks) {
-            if (!stack.isEmpty()) {
-                RemoteFloatingItem previousItem = previous == null ? null : previous.find(stack);
-                copiedStacks.add(previousItem == null
-                        ? new RemoteFloatingItem(stack.copyWithCount(stack.getCount()))
-                        : previousItem.update(stack.copyWithCount(stack.getCount())));
+        List<RemoteFloatingItem> copiedStacks = new ArrayList<>(snapshot.slots().size());
+        for (RoyalArmsOrbitState.SlotSnapshot slot : snapshot.slots()) {
+            if (!slot.stack().isEmpty()) {
+                RemoteFloatingItem previousItem = previous == null ? null : previous.find(slot.key());
+                RemoteFloatingItem item = previousItem == null
+                        ? new RemoteFloatingItem(slot)
+                        : previousItem.update(slot);
+                item.applySlot(slot, 0.0D);
+                copiedStacks.add(item);
             }
         }
-        remoteVisuals.put(ownerUuid, new RemoteRoyalArmsVisual(legacy, copiedStacks, ardynWarpCharges));
+        remoteVisuals.put(ownerUuid, new RemoteRoyalArmsVisual(legacy, copiedStacks, ardynWarpCharges, snapshot));
+    }
+
+    public static void updateOrbitMotion(UUID ownerUuid, RoyalArmsOrbitState.Snapshot motion) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.player != null && ownerUuid.equals(client.player.getUuid())) {
+            localOrbitSnapshot = mergeMotion(motion, localOrbitSnapshot.slots());
+            return;
+        }
+
+        RemoteRoyalArmsVisual visual = remoteVisuals.get(ownerUuid);
+        if (visual != null && !visual.closing) {
+            visual.snapshot = mergeMotion(motion, visual.snapshot.slots());
+        }
     }
 
     public static void clearRemoteVisuals() {
         remoteVisuals.clear();
+        localOrbitSnapshot = RoyalArmsOrbitState.Snapshot.empty(0L);
         clearGuardBlocks();
         ardynBarrageOwners.clear();
         clearAura();
@@ -1443,9 +1473,9 @@ public final class RoyalArmsAbility {
         MinecraftClient client = MinecraftClient.getInstance();
         UUID selfUuid = client.player == null ? null : client.player.getUuid();
         if (ownerUuid.equals(selfUuid)) {
-            initialAuraAppearance = true;
+            initialAuraAppearance = false;
+            applyLocalOrbitPrediction(client.world == null ? localOrbitSnapshot.serverWorldTime() : client.world.getTime());
             for (FloatingItem item : floatingItems) {
-                item.spawnTicks = 0;
                 item.closing = false;
                 item.closeTicks = 0;
                 item.highlightScale = 1.0F;
@@ -1460,8 +1490,11 @@ public final class RoyalArmsAbility {
 
         visual.closing = false;
         for (RemoteFloatingItem item : visual.items) {
-            item.spawnTicks = 0;
             item.closeTicks = 0;
+            item.applyPrediction(
+                    visual.snapshot,
+                    client.world == null ? visual.snapshot.serverWorldTime() : client.world.getTime()
+            );
         }
     }
 
@@ -1476,42 +1509,6 @@ public final class RoyalArmsAbility {
             }
         }
         return null;
-    }
-
-    private record InventoryItem(String key, int slot, ItemStack stack) {
-    }
-
-    private static boolean shouldUseArdynInnerRing(LuciiLegacy legacy, int charges, int index, int total) {
-        return index <= getArdynInnerRingCount(legacy, charges, total);
-    }
-
-    private static int getArdynInnerRingCount(LuciiLegacy legacy, int charges, int total) {
-        if (legacy != LuciiLegacy.ARDYN || charges < 3 || total < 2) {
-            return 0;
-        }
-
-        int stage = MathHelper.clamp(charges / 3, 1, 4);
-        int maxInnerCount = Math.max(1, total / 2);
-        return Math.max(1, MathHelper.ceil(maxInnerCount * (stage / 4.0F)));
-    }
-
-    private static float getRingAngleDegrees(LuciiLegacy legacy, int charges, int index, int total) {
-        int innerCount = getArdynInnerRingCount(legacy, charges, total);
-        if (innerCount <= 0) {
-            return index * 360.0F / total;
-        }
-
-        if (index <= innerCount) {
-            return index * 360.0F / innerCount;
-        }
-
-        int outerCount = total - innerCount;
-        if (outerCount <= 0) {
-            return index * 360.0F / total;
-        }
-
-        int outerIndex = index - innerCount;
-        return outerIndex * 360.0F / outerCount;
     }
 
     private static float easeOutCubic(float value) {
@@ -1599,18 +1596,24 @@ public final class RoyalArmsAbility {
         private final LuciiLegacy legacy;
         private final List<RemoteFloatingItem> items;
         private int ardynWarpCharges;
+        private RoyalArmsOrbitState.Snapshot snapshot;
         private boolean closing;
 
-        private RemoteRoyalArmsVisual(LuciiLegacy legacy, List<RemoteFloatingItem> items, int ardynWarpCharges) {
+        private RemoteRoyalArmsVisual(
+                LuciiLegacy legacy,
+                List<RemoteFloatingItem> items,
+                int ardynWarpCharges,
+                RoyalArmsOrbitState.Snapshot snapshot
+        ) {
             this.legacy = legacy;
             this.items = items;
             this.ardynWarpCharges = ardynWarpCharges;
+            this.snapshot = snapshot;
         }
 
-        private RemoteFloatingItem find(ItemStack stack) {
-            Identifier id = Registries.ITEM.getId(stack.getItem());
+        private RemoteFloatingItem find(String key) {
             for (RemoteFloatingItem item : items) {
-                if (Registries.ITEM.getId(item.stack.getItem()).equals(id)) {
+                if (item.key.equals(key)) {
                     return item;
                 }
             }
@@ -1658,6 +1661,30 @@ public final class RoyalArmsAbility {
             return this;
         }
 
+        private void applySlot(RoyalArmsOrbitState.SlotSnapshot slot, double elapsed) {
+            this.stack = slot.stack().copyWithCount(slot.stack().getCount());
+            this.angle = RoyalArmsOrbitMath.advanceAngle(slot.baseAngle(), slot.targetBaseAngle(), elapsed);
+            this.targetAngle = slot.targetBaseAngle();
+            this.index = slot.index();
+            this.innerProgress = RoyalArmsOrbitMath.advanceInnerProgress(
+                    slot.innerProgress(),
+                    slot.innerTarget(),
+                    elapsed
+            );
+            this.innerTarget = slot.innerTarget();
+            this.spawnTicks = Math.min(
+                    APPEAR_TICKS,
+                    slot.spawnTicks() + Math.max(0, (int) Math.floor(elapsed))
+            );
+        }
+
+        private float linearAppearanceProgress(float tickDelta) {
+            if (closing) {
+                return radiusProgress(tickDelta);
+            }
+            return interpolatedSpawnTicks(tickDelta) / APPEAR_TICKS;
+        }
+
         private float visualScale(float tickDelta) {
             if (closing) {
                 return Math.max(0.01F, 1.0F - easeInOutCubic(interpolatedCloseTicks(tickDelta) / (float) DISAPPEAR_TICKS));
@@ -1690,7 +1717,10 @@ public final class RoyalArmsAbility {
     }
 
     private static final class RemoteFloatingItem {
+        private final String key;
         private ItemStack stack;
+        private int index;
+        private float angle;
         private int spawnTicks;
         private int closeTicks;
         private float closeTime;
@@ -1704,14 +1734,47 @@ public final class RoyalArmsAbility {
         private float innerProgress;
         private boolean innerTarget;
 
-        private RemoteFloatingItem(ItemStack stack) {
-            this.stack = stack;
+        private RemoteFloatingItem(RoyalArmsOrbitState.SlotSnapshot slot) {
+            this.key = slot.key();
+            this.stack = slot.stack().copyWithCount(slot.stack().getCount());
+            this.index = slot.index();
+            this.angle = slot.baseAngle();
         }
 
-        private RemoteFloatingItem update(ItemStack newStack) {
-            this.stack = newStack;
+        private RemoteFloatingItem update(RoyalArmsOrbitState.SlotSnapshot slot) {
+            this.stack = slot.stack().copyWithCount(slot.stack().getCount());
             this.closeTicks = 0;
             return this;
+        }
+
+        private void applyPrediction(RoyalArmsOrbitState.Snapshot snapshot, double worldTime) {
+            RoyalArmsOrbitState.SlotSnapshot slot = findSlot(snapshot, key);
+            if (slot != null) {
+                applySlot(slot, snapshotElapsed(snapshot, worldTime));
+            }
+        }
+
+        private void applySlot(RoyalArmsOrbitState.SlotSnapshot slot, double elapsed) {
+            this.stack = slot.stack().copyWithCount(slot.stack().getCount());
+            this.index = slot.index();
+            this.angle = RoyalArmsOrbitMath.advanceAngle(slot.baseAngle(), slot.targetBaseAngle(), elapsed);
+            this.innerProgress = RoyalArmsOrbitMath.advanceInnerProgress(
+                    slot.innerProgress(),
+                    slot.innerTarget(),
+                    elapsed
+            );
+            this.innerTarget = slot.innerTarget();
+            this.spawnTicks = Math.min(
+                    APPEAR_TICKS,
+                    slot.spawnTicks() + Math.max(0, (int) Math.floor(elapsed))
+            );
+        }
+
+        private float linearAppearanceProgress(float tickDelta) {
+            if (closeTicks > 0) {
+                return radiusProgress(tickDelta);
+            }
+            return interpolatedSpawnTicks(tickDelta) / APPEAR_TICKS;
         }
 
         private float visualScale(float tickDelta) {

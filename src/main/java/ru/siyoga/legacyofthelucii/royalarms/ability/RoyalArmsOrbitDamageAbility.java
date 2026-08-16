@@ -17,13 +17,15 @@ import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Box;
-import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.World;
 import ru.siyoga.legacyofthelucii.LegacyOfTheLucii;
 import ru.siyoga.legacyofthelucii.legacy.LuciiLegacy;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerState;
 import ru.siyoga.legacyofthelucii.legacy.LuciiPlayerStates;
 import ru.siyoga.legacyofthelucii.network.LuciiNetwork;
+import ru.siyoga.legacyofthelucii.royalarms.orbit.RoyalArmsOrbitMath;
+import ru.siyoga.legacyofthelucii.royalarms.orbit.RoyalArmsOrbitState;
 
 import java.util.HashMap;
 import java.util.List;
@@ -36,23 +38,20 @@ public final class RoyalArmsOrbitDamageAbility {
             new Identifier(LegacyOfTheLucii.MOD_ID, "royal_arms_weapons")
     );
 
-    private static final double RADIUS = 2.5D;
-    private static final double INNER_RADIUS = 1.45D;
-    private static final double ORBIT_Y_OFFSET = 1.0D;
-    private static final double BOB_HEIGHT = 0.3D;
-    private static final float NORMAL_ORBIT_SPEED = 2.0F;
-    private static final float FAST_ORBIT_SPEED = 5.0F;
-    private static final float ARDYN_INNER_RING_SPEED_MULTIPLIER = 1.65F;
     private static final double HIT_RADIUS = 0.55D;
+    private static final double MAX_CONTINUOUS_OWNER_MOVEMENT_SQUARED = 64.0D;
     private static final float BASE_TOUCH_DAMAGE = 0.2F;
     private static final float WEAPON_DAMAGE_MULTIPLIER = 1.0F / 10.0F;
     private static final int HIT_COOLDOWN_TICKS = 10;
+    private static final int GUARD_EXIT_DAMAGE_DELAY_TICKS = 45;
+    private static final int ABILITY_EXIT_DAMAGE_DELAY_TICKS = 10;
 
     private static final Map<DamageKey, Integer> HIT_COOLDOWNS = new HashMap<>();
-    private static final Map<UUID, Float> ORBIT_TIMES = new HashMap<>();
-    private static final Map<UUID, Boolean> PREVIOUS_SNEAKING = new HashMap<>();
-    private static final Map<UUID, Boolean> PAUSED_BY_DOUBLE_SNEAK = new HashMap<>();
-    private static final Map<UUID, Integer> SNEAK_DOUBLE_TAP_WINDOWS = new HashMap<>();
+    private static final Map<UUID, RoyalArmsOrbitState> ORBIT_STATES = new HashMap<>();
+    private static final Map<UUID, Map<String, Vec3d>> PREVIOUS_ITEM_POSITIONS = new HashMap<>();
+    private static final Map<UUID, Vec3d> PREVIOUS_OWNER_POSITIONS = new HashMap<>();
+    private static final Map<UUID, net.minecraft.registry.RegistryKey<World>> PREVIOUS_OWNER_WORLDS = new HashMap<>();
+    private static final Map<UUID, Integer> VISUAL_OVERRIDE_EXIT_DAMAGE_DELAYS = new HashMap<>();
 
     private RoyalArmsOrbitDamageAbility() {
     }
@@ -66,15 +65,6 @@ public final class RoyalArmsOrbitDamageAbility {
             if (!state.royalArmsActive()) {
                 continue;
             }
-
-            if (RoyalArmsBindAbility.isBinding(player)) {
-                continue;
-            }
-
-            if (RoyalArmsWarpStrikeAbility.isArdynBarrageActive(player)) {
-                continue;
-            }
-
             tickPlayer(player);
         }
     }
@@ -90,75 +80,112 @@ public final class RoyalArmsOrbitDamageAbility {
             activePlayers.put(player.getUuid(), LuciiPlayerStates.get(player).royalArmsActive());
         }
 
-        ORBIT_TIMES.keySet().removeIf(uuid -> !activePlayers.getOrDefault(uuid, false));
-        PREVIOUS_SNEAKING.keySet().removeIf(uuid -> !activePlayers.getOrDefault(uuid, false));
-        PAUSED_BY_DOUBLE_SNEAK.keySet().removeIf(uuid -> !activePlayers.getOrDefault(uuid, false));
-        SNEAK_DOUBLE_TAP_WINDOWS.keySet().removeIf(uuid -> !activePlayers.getOrDefault(uuid, false));
-    }
-
-    private static float tickOrbitTime(ServerPlayerEntity owner) {
-        UUID ownerUuid = owner.getUuid();
-        boolean sneaking = owner.isSneaking();
-        boolean wasSneaking = PREVIOUS_SNEAKING.getOrDefault(ownerUuid, false);
-        int doubleTapTicks = SNEAK_DOUBLE_TAP_WINDOWS.getOrDefault(ownerUuid, 0);
-        boolean paused = PAUSED_BY_DOUBLE_SNEAK.getOrDefault(ownerUuid, false);
-
-        if (sneaking && !wasSneaking) {
-            if (doubleTapTicks > 0) {
-                paused = true;
-                doubleTapTicks = 0;
-            } else {
-                doubleTapTicks = 8;
-            }
-        }
-
-        if (!sneaking && wasSneaking) {
-            paused = false;
-        }
-
-        if (doubleTapTicks > 0) {
-            doubleTapTicks--;
-        }
-
-        float speed = paused && sneaking ? 0.0F : sneaking ? NORMAL_ORBIT_SPEED : FAST_ORBIT_SPEED;
-        float time = ORBIT_TIMES.getOrDefault(ownerUuid, 0.0F) + speed;
-        ORBIT_TIMES.put(ownerUuid, time);
-        PREVIOUS_SNEAKING.put(ownerUuid, sneaking);
-        PAUSED_BY_DOUBLE_SNEAK.put(ownerUuid, paused);
-        SNEAK_DOUBLE_TAP_WINDOWS.put(ownerUuid, doubleTapTicks);
-        return time;
+        ORBIT_STATES.keySet().removeIf(uuid -> !activePlayers.getOrDefault(uuid, false));
+        PREVIOUS_ITEM_POSITIONS.keySet().removeIf(uuid -> !activePlayers.getOrDefault(uuid, false));
+        PREVIOUS_OWNER_POSITIONS.keySet().removeIf(uuid -> !activePlayers.getOrDefault(uuid, false));
+        PREVIOUS_OWNER_WORLDS.keySet().removeIf(uuid -> !activePlayers.getOrDefault(uuid, false));
+        VISUAL_OVERRIDE_EXIT_DAMAGE_DELAYS.keySet().removeIf(uuid -> !activePlayers.getOrDefault(uuid, false));
     }
 
     private static void tickPlayer(ServerPlayerEntity owner) {
-        List<ItemStack> stacks = RoyalArmsInventoryItems.collect(owner);
-        if (stacks.isEmpty()) {
+        List<RoyalArmsInventoryItems.OrbitItem> items = RoyalArmsInventoryItems.collectSlots(owner);
+        LuciiPlayerState state = LuciiPlayerStates.get(owner);
+        ServerWorld world = owner.getServerWorld();
+        UUID ownerUuid = owner.getUuid();
+        RoyalArmsOrbitState orbitState = ORBIT_STATES.computeIfAbsent(ownerUuid, ignored -> new RoyalArmsOrbitState());
+        RoyalArmsOrbitState.TickResult tickResult = orbitState.tick(
+                world.getTime(),
+                owner.isSneaking(),
+                state.legacy(),
+                state.ardynWarpCharges(),
+                items
+        );
+        if (tickResult.itemsChanged()) {
+            LuciiNetwork.broadcastRoyalArmsVisual(owner);
+        } else if (tickResult.motionModeChanged()) {
+            LuciiNetwork.broadcastRoyalArmsOrbitState(owner);
+        }
+
+        boolean guardActive = RoyalArmsGuardAbility.isActive(ownerUuid);
+        boolean bindActive = RoyalArmsBindAbility.isBinding(owner);
+        boolean barrageActive = RoyalArmsWarpStrikeAbility.isArdynBarrageActive(owner);
+        boolean visualOverrideActive = guardActive || bindActive || barrageActive;
+        if (visualOverrideActive) {
+            int delay = guardActive ? GUARD_EXIT_DAMAGE_DELAY_TICKS : ABILITY_EXIT_DAMAGE_DELAY_TICKS;
+            VISUAL_OVERRIDE_EXIT_DAMAGE_DELAYS.merge(ownerUuid, delay, Math::max);
+        }
+        int visualOverrideExitDelay = VISUAL_OVERRIDE_EXIT_DAMAGE_DELAYS.getOrDefault(ownerUuid, 0);
+        if (!visualOverrideActive && visualOverrideExitDelay > 0) {
+            visualOverrideExitDelay--;
+            if (visualOverrideExitDelay == 0) {
+                VISUAL_OVERRIDE_EXIT_DAMAGE_DELAYS.remove(ownerUuid);
+            } else {
+                VISUAL_OVERRIDE_EXIT_DAMAGE_DELAYS.put(ownerUuid, visualOverrideExitDelay);
+            }
+        }
+
+        if (items.isEmpty()
+                || visualOverrideActive
+                || visualOverrideExitDelay > 0) {
+            resetPreviousPositions(owner);
             return;
         }
 
-        LuciiPlayerState state = LuciiPlayerStates.get(owner);
+        damageAlongOrbit(owner, orbitState.snapshot(world.getTime()));
+    }
+
+    private static void damageAlongOrbit(ServerPlayerEntity owner, RoyalArmsOrbitState.Snapshot snapshot) {
         ServerWorld world = owner.getServerWorld();
         Vec3d ownerPos = owner.getPos();
-        float time = tickOrbitTime(owner);
-        Box searchBox = owner.getBoundingBox().expand(RADIUS + HIT_RADIUS + 1.0D, 2.0D, RADIUS + HIT_RADIUS + 1.0D);
+        UUID ownerUuid = owner.getUuid();
+        Vec3d previousOwnerPos = PREVIOUS_OWNER_POSITIONS.get(ownerUuid);
+        net.minecraft.registry.RegistryKey<World> previousWorld = PREVIOUS_OWNER_WORLDS.get(ownerUuid);
+        boolean discontinuity = previousOwnerPos == null
+                || !previousWorld.equals(world.getRegistryKey())
+                || previousOwnerPos.squaredDistanceTo(ownerPos) > MAX_CONTINUOUS_OWNER_MOVEMENT_SQUARED;
+        Map<String, Vec3d> previousPositions = PREVIOUS_ITEM_POSITIONS.computeIfAbsent(
+                ownerUuid,
+                ignored -> new HashMap<>()
+        );
+        if (discontinuity) {
+            previousPositions.clear();
+        }
+
         Map<LivingEntity, Float> pendingDamage = new HashMap<>();
+        Map<String, Vec3d> currentPositions = new HashMap<>();
+        for (RoyalArmsOrbitState.SlotSnapshot slot : snapshot.slots()) {
+            Vec3d currentPos = RoyalArmsOrbitMath.position(
+                    ownerPos,
+                    slot.index(),
+                    snapshot.phase(),
+                    slot.baseAngle(),
+                    slot.innerProgress(),
+                    slot.innerTarget(),
+                    RoyalArmsOrbitMath.appearanceProgress(slot.spawnTicks())
+            );
+            Vec3d previousPos = previousPositions.getOrDefault(slot.key(), currentPos);
+            currentPositions.put(slot.key(), currentPos);
+            Box sweptBounds = boxBetween(previousPos, currentPos).expand(HIT_RADIUS);
+            float damage = damageFor(slot.stack());
 
-        for (int i = 0; i < stacks.size(); i++) {
-            ItemStack stack = stacks.get(i);
-            Vec3d itemPos = getItemPosition(i, stacks.size(), ownerPos, time, state.legacy(), state.ardynWarpCharges());
-            float damage = damageFor(stack);
-
-            for (LivingEntity target : world.getEntitiesByClass(LivingEntity.class, searchBox, target -> canDamage(owner, target))) {
+            for (LivingEntity target : world.getEntitiesByClass(
+                    LivingEntity.class,
+                    sweptBounds,
+                    target -> canDamage(owner, target)
+            )) {
                 if (RoyalArmsBindAbility.isBoundTarget(owner, target)) {
                     continue;
                 }
-
-                if (!target.getBoundingBox().expand(HIT_RADIUS).contains(itemPos)) {
+                if (!intersectsSweptPoint(previousPos, currentPos, target.getBoundingBox().expand(HIT_RADIUS))) {
                     continue;
                 }
-
                 pendingDamage.merge(target, damage, Math::max);
             }
         }
+
+        PREVIOUS_ITEM_POSITIONS.put(ownerUuid, currentPositions);
+        PREVIOUS_OWNER_POSITIONS.put(ownerUuid, ownerPos);
+        PREVIOUS_OWNER_WORLDS.put(ownerUuid, world.getRegistryKey());
 
         for (Map.Entry<LivingEntity, Float> entry : pendingDamage.entrySet()) {
             LivingEntity target = entry.getKey();
@@ -172,6 +199,43 @@ public final class RoyalArmsOrbitDamageAbility {
                 addArdynWarpCharge(owner);
             }
         }
+    }
+
+    private static Box boxBetween(Vec3d from, Vec3d to) {
+        return new Box(
+                Math.min(from.x, to.x),
+                Math.min(from.y, to.y),
+                Math.min(from.z, to.z),
+                Math.max(from.x, to.x),
+                Math.max(from.y, to.y),
+                Math.max(from.z, to.z)
+        );
+    }
+
+    private static boolean intersectsSweptPoint(Vec3d from, Vec3d to, Box box) {
+        return box.contains(from) || box.contains(to) || box.raycast(from, to).isPresent();
+    }
+
+    private static void resetPreviousPositions(ServerPlayerEntity owner) {
+        UUID ownerUuid = owner.getUuid();
+        PREVIOUS_ITEM_POSITIONS.remove(ownerUuid);
+        PREVIOUS_OWNER_POSITIONS.remove(ownerUuid);
+        PREVIOUS_OWNER_WORLDS.remove(ownerUuid);
+    }
+
+    public static RoyalArmsOrbitState.Snapshot snapshot(ServerPlayerEntity owner) {
+        ServerWorld world = owner.getServerWorld();
+        LuciiPlayerState playerState = LuciiPlayerStates.get(owner);
+        RoyalArmsOrbitState orbitState = ORBIT_STATES.computeIfAbsent(
+                owner.getUuid(),
+                ignored -> new RoyalArmsOrbitState()
+        );
+        orbitState.synchronizeItems(
+                playerState.legacy(),
+                playerState.ardynWarpCharges(),
+                RoyalArmsInventoryItems.collectSlots(owner)
+        );
+        return orbitState.snapshot(world.getTime());
     }
 
     private static void addArdynWarpCharge(ServerPlayerEntity owner) {
@@ -209,52 +273,6 @@ public final class RoyalArmsOrbitDamageAbility {
                 && target != owner
                 && !target.isSpectator()
                 && target.getWorld() == owner.getWorld();
-    }
-
-    private static Vec3d getItemPosition(int index, int total, Vec3d ownerPos, float time, LuciiLegacy legacy, int charges) {
-        int visualIndex = index + 1;
-        boolean innerRing = shouldUseArdynInnerRing(legacy, charges, visualIndex, total);
-        float direction = innerRing ? -ARDYN_INNER_RING_SPEED_MULTIPLIER : 1.0F;
-        float angleDegrees = getRingAngleDegrees(legacy, charges, visualIndex, total) + time * direction;
-        double angle = Math.toRadians(angleDegrees);
-        double radius = innerRing ? INNER_RADIUS : RADIUS;
-        double x = Math.sin(angle) * radius;
-        double z = Math.cos(angle) * radius;
-        double y = ORBIT_Y_OFFSET + Math.sin(time * 0.05F + visualIndex) * BOB_HEIGHT;
-        return ownerPos.add(x, y, z);
-    }
-
-    private static boolean shouldUseArdynInnerRing(LuciiLegacy legacy, int charges, int index, int total) {
-        return index <= getArdynInnerRingCount(legacy, charges, total);
-    }
-
-    private static int getArdynInnerRingCount(LuciiLegacy legacy, int charges, int total) {
-        if (legacy != LuciiLegacy.ARDYN || charges < 3 || total < 2) {
-            return 0;
-        }
-
-        int stage = MathHelper.clamp(charges / 3, 1, 4);
-        int maxInnerCount = Math.max(1, total / 2);
-        return Math.max(1, MathHelper.ceil(maxInnerCount * (stage / 4.0F)));
-    }
-
-    private static float getRingAngleDegrees(LuciiLegacy legacy, int charges, int index, int total) {
-        int innerCount = getArdynInnerRingCount(legacy, charges, total);
-        if (innerCount <= 0) {
-            return index * 360.0F / total;
-        }
-
-        if (index <= innerCount) {
-            return index * 360.0F / innerCount;
-        }
-
-        int outerCount = total - innerCount;
-        if (outerCount <= 0) {
-            return index * 360.0F / total;
-        }
-
-        int outerIndex = index - innerCount;
-        return outerIndex * 360.0F / outerCount;
     }
 
     private static float damageFor(ItemStack stack) {
