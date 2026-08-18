@@ -1,7 +1,7 @@
 package ru.siyoga.legacyofthelucii.royalarms.ability;
 
-import net.minecraft.entity.attribute.EntityAttributeModifier;
 import net.minecraft.entity.attribute.EntityAttributeInstance;
+import net.minecraft.entity.attribute.EntityAttributeModifier;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.server.MinecraftServer;
@@ -30,7 +30,13 @@ public final class ArdynSniperAbility {
     public static final int MANA_COST = 10;
     public static final double BULLET_SPEED = 6.0D;
 
-    private static final double BULLET_SPAWN_FORWARD_OFFSET = 0.45D;
+    public static final int EQUIP_TICKS = 14;
+    public static final int SHOOT_ANIMATION_TICKS = 9;
+    public static final int UNEQUIP_TICKS = 15;
+
+    private static final double BULLET_SPAWN_FORWARD_OFFSET = 0.65D;
+    private static final double BULLET_SPAWN_SIDE_OFFSET = 0.10D;
+    private static final double BULLET_SPAWN_DOWN_OFFSET = 0.22D;
     private static final UUID MOVEMENT_SLOWDOWN_MODIFIER_ID = UUID.fromString("4d4cc3a7-14c6-4bf6-92d7-9e7ccf1d6798");
     private static final EntityAttributeModifier MOVEMENT_SLOWDOWN_MODIFIER = new EntityAttributeModifier(
             MOVEMENT_SLOWDOWN_MODIFIER_ID,
@@ -44,13 +50,19 @@ public final class ArdynSniperAbility {
     }
 
     public static void toggle(ServerPlayerEntity player) {
+        MinecraftServer server = player.getServer();
+        if (server == null) {
+            return;
+        }
+
         UUID playerUuid = player.getUuid();
         RuntimeState runtime = STATES.get(playerUuid);
         if (runtime != null && runtime.active) {
-            runtime.active = false;
-            removeMovementSlowdown(player);
-            sendState(player, runtime);
-            cleanupExpiredState(player.getServer(), playerUuid, runtime);
+            if (runtime.phase != Phase.HOLD) {
+                sendState(player, runtime);
+                return;
+            }
+            beginUnequip(player, runtime, server.getTicks());
             return;
         }
 
@@ -65,7 +77,14 @@ public final class ArdynSniperAbility {
         }
         runtime.active = true;
         runtime.world = player.getWorld().getRegistryKey();
+        runtime.phase = Phase.EQUIP;
+        runtime.phaseEndTick = server.getTicks() + EQUIP_TICKS;
         applyMovementSlowdown(player);
+        ArdynSniperNetwork.broadcastAnimation(
+                player.getServerWorld(),
+                playerUuid,
+                ArdynSniperNetwork.ANIMATION_EQUIP
+        );
         sendState(player, runtime);
     }
 
@@ -76,7 +95,11 @@ public final class ArdynSniperAbility {
             return;
         }
         if (!canRemainActive(player, runtime)) {
-            deactivate(player, runtime);
+            forceDeactivate(player, runtime);
+            return;
+        }
+        if (runtime.phase != Phase.HOLD) {
+            sendState(player, runtime);
             return;
         }
 
@@ -106,6 +129,13 @@ public final class ArdynSniperAbility {
 
         spawnBullet(player);
         runtime.nextShotTick = now + RELOAD_TICKS;
+        runtime.phase = Phase.SHOOT;
+        runtime.phaseEndTick = now + SHOOT_ANIMATION_TICKS;
+        ArdynSniperNetwork.broadcastAnimation(
+                player.getServerWorld(),
+                player.getUuid(),
+                ArdynSniperNetwork.ANIMATION_SHOOT
+        );
         sendState(player, runtime);
     }
 
@@ -123,10 +153,17 @@ public final class ArdynSniperAbility {
 
             if (runtime.active && !canRemainActive(player, runtime)) {
                 runtime.active = false;
+                runtime.phase = Phase.NONE;
                 removeMovementSlowdown(player);
+                ArdynSniperNetwork.broadcastAnimation(
+                        player.getServerWorld(),
+                        player.getUuid(),
+                        ArdynSniperNetwork.ANIMATION_CLEAR
+                );
                 ArdynSniperNetwork.sendState(player, false, remainingCooldown(server, runtime));
             } else if (runtime.active) {
                 applyMovementSlowdown(player);
+                tickPhase(player, runtime, server.getTicks());
             } else {
                 removeMovementSlowdown(player);
             }
@@ -151,9 +188,24 @@ public final class ArdynSniperAbility {
         }
         ArdynSniperNetwork.sendState(
                 player,
-                runtime != null && runtime.active,
+                isClientAiming(runtime),
                 remainingCooldown(player, runtime)
         );
+    }
+
+    public static void syncAnimationsTo(ServerPlayerEntity viewer) {
+        for (Map.Entry<UUID, RuntimeState> entry : STATES.entrySet()) {
+            RuntimeState runtime = entry.getValue();
+            if (!runtime.active || runtime.world == null
+                    || !runtime.world.equals(viewer.getWorld().getRegistryKey())) {
+                continue;
+            }
+            ArdynSniperNetwork.sendAnimation(
+                    viewer,
+                    entry.getKey(),
+                    animationForPhase(runtime.phase)
+            );
+        }
     }
 
     public static void clearPlayer(ServerPlayerEntity player, String reason) {
@@ -163,8 +215,15 @@ public final class ArdynSniperAbility {
     public static void clearPlayer(ServerPlayerEntity player, String reason, boolean notifyClient) {
         RuntimeState removed = STATES.remove(player.getUuid());
         removeMovementSlowdown(player);
-        if (removed != null && notifyClient) {
-            ArdynSniperNetwork.sendState(player, false, 0);
+        if (removed != null) {
+            ArdynSniperNetwork.broadcastAnimation(
+                    player.getServerWorld(),
+                    player.getUuid(),
+                    ArdynSniperNetwork.ANIMATION_CLEAR
+            );
+            if (notifyClient) {
+                ArdynSniperNetwork.sendState(player, false, 0);
+            }
         }
     }
 
@@ -172,10 +231,56 @@ public final class ArdynSniperAbility {
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
             removeMovementSlowdown(player);
             if (STATES.containsKey(player.getUuid())) {
+                ArdynSniperNetwork.broadcastAnimation(
+                        player.getServerWorld(),
+                        player.getUuid(),
+                        ArdynSniperNetwork.ANIMATION_CLEAR
+                );
                 ArdynSniperNetwork.sendState(player, false, 0);
             }
         }
         STATES.clear();
+    }
+
+    private static void tickPhase(ServerPlayerEntity player, RuntimeState runtime, long now) {
+        if (runtime.phaseEndTick <= 0L || now < runtime.phaseEndTick) {
+            return;
+        }
+
+        if (runtime.phase == Phase.EQUIP || runtime.phase == Phase.SHOOT) {
+            runtime.phase = Phase.HOLD;
+            runtime.phaseEndTick = 0L;
+            ArdynSniperNetwork.broadcastAnimation(
+                    player.getServerWorld(),
+                    player.getUuid(),
+                    ArdynSniperNetwork.ANIMATION_HOLD
+            );
+            return;
+        }
+
+        if (runtime.phase == Phase.UNEQUIP) {
+            runtime.active = false;
+            runtime.phase = Phase.NONE;
+            runtime.phaseEndTick = 0L;
+            removeMovementSlowdown(player);
+            ArdynSniperNetwork.broadcastAnimation(
+                    player.getServerWorld(),
+                    player.getUuid(),
+                    ArdynSniperNetwork.ANIMATION_CLEAR
+            );
+            ArdynSniperNetwork.sendState(player, false, remainingCooldown(player, runtime));
+        }
+    }
+
+    private static void beginUnequip(ServerPlayerEntity player, RuntimeState runtime, long now) {
+        runtime.phase = Phase.UNEQUIP;
+        runtime.phaseEndTick = now + UNEQUIP_TICKS;
+        ArdynSniperNetwork.broadcastAnimation(
+                player.getServerWorld(),
+                player.getUuid(),
+                ArdynSniperNetwork.ANIMATION_UNEQUIP
+        );
+        sendState(player, runtime);
     }
 
     private static boolean canEnter(ServerPlayerEntity player) {
@@ -208,8 +313,19 @@ public final class ArdynSniperAbility {
 
     private static void spawnBullet(ServerPlayerEntity player) {
         ServerWorld world = player.getServerWorld();
-        Vec3d direction = player.getRotationVec(1.0F).normalize();
-        Vec3d start = player.getEyePos().add(direction.multiply(BULLET_SPAWN_FORWARD_OFFSET));
+        Vec3d viewDirection = player.getRotationVec(1.0F).normalize();
+        Vec3d horizontalRight = new Vec3d(-viewDirection.z, 0.0D, viewDirection.x);
+        if (horizontalRight.lengthSquared() > 1.0E-8D) {
+            horizontalRight = horizontalRight.normalize();
+        }
+
+        Vec3d eye = player.getEyePos();
+        Vec3d start = eye
+                .add(viewDirection.multiply(BULLET_SPAWN_FORWARD_OFFSET))
+                .add(horizontalRight.multiply(BULLET_SPAWN_SIDE_OFFSET))
+                .add(0.0D, -BULLET_SPAWN_DOWN_OFFSET, 0.0D);
+        Vec3d aimPoint = eye.add(viewDirection.multiply(MAX_RANGE));
+        Vec3d bulletDirection = aimPoint.subtract(start).normalize();
 
         ArdynSniperBulletEntity bullet = new ArdynSniperBulletEntity(
                 ArdynSniperContent.SNIPER_BULLET_ENTITY,
@@ -218,22 +334,33 @@ public final class ArdynSniperAbility {
         bullet.setPosition(start.x, start.y, start.z);
         bullet.configure(
                 player,
-                direction.multiply(BULLET_SPEED),
+                bulletDirection.multiply(BULLET_SPEED),
                 DAMAGE,
                 MAX_RANGE
         );
         world.spawnEntity(bullet);
     }
 
-    private static void deactivate(ServerPlayerEntity player, RuntimeState runtime) {
+    private static void forceDeactivate(ServerPlayerEntity player, RuntimeState runtime) {
         runtime.active = false;
+        runtime.phase = Phase.NONE;
+        runtime.phaseEndTick = 0L;
         removeMovementSlowdown(player);
+        ArdynSniperNetwork.broadcastAnimation(
+                player.getServerWorld(),
+                player.getUuid(),
+                ArdynSniperNetwork.ANIMATION_CLEAR
+        );
         sendState(player, runtime);
         cleanupExpiredState(player.getServer(), player.getUuid(), runtime);
     }
 
     private static void sendState(ServerPlayerEntity player, RuntimeState runtime) {
-        ArdynSniperNetwork.sendState(player, runtime.active, remainingCooldown(player, runtime));
+        ArdynSniperNetwork.sendState(player, isClientAiming(runtime), remainingCooldown(player, runtime));
+    }
+
+    private static boolean isClientAiming(RuntimeState runtime) {
+        return runtime != null && runtime.active && runtime.phase != Phase.UNEQUIP;
     }
 
     private static int remainingCooldown(ServerPlayerEntity player, RuntimeState runtime) {
@@ -269,9 +396,29 @@ public final class ArdynSniperAbility {
         }
     }
 
+    private static int animationForPhase(Phase phase) {
+        return switch (phase) {
+            case EQUIP -> ArdynSniperNetwork.ANIMATION_EQUIP;
+            case SHOOT -> ArdynSniperNetwork.ANIMATION_SHOOT;
+            case UNEQUIP -> ArdynSniperNetwork.ANIMATION_UNEQUIP;
+            case HOLD -> ArdynSniperNetwork.ANIMATION_HOLD;
+            case NONE -> ArdynSniperNetwork.ANIMATION_CLEAR;
+        };
+    }
+
+    private enum Phase {
+        NONE,
+        EQUIP,
+        HOLD,
+        SHOOT,
+        UNEQUIP
+    }
+
     private static final class RuntimeState {
         private boolean active;
         private RegistryKey<World> world;
         private long nextShotTick;
+        private Phase phase = Phase.NONE;
+        private long phaseEndTick;
     }
 }

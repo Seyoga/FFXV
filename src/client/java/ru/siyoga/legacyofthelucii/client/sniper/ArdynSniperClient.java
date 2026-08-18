@@ -96,6 +96,7 @@ public final class ArdynSniperClient {
         if (client.player == null || ownerUuid == null || !ownerUuid.equals(client.player.getUuid())) {
             return;
         }
+        ArdynSniperAnimations.onLocalState(ownerUuid, newActive);
         setState(newActive, cooldownTicks);
     }
 
@@ -161,7 +162,15 @@ public final class ArdynSniperClient {
 
         boolean comboDown = isCtrlDown(client) && isSixDown(client);
         if (comboDown && !comboWasDown && client.getNetworkHandler() != null) {
-            sendAction(ArdynSniperNetwork.TOGGLE_ACTION);
+            if (!active) {
+                sendAction(ArdynSniperNetwork.TOGGLE_ACTION);
+            } else if (client.player != null
+                    && ArdynSniperAnimations.canLocalUnequip(client.player.getUuid())) {
+                ArdynSniperAnimations.predictLocalUnequip(client.player.getUuid());
+                active = false;
+                releaseSceneTexture();
+                sendAction(ArdynSniperNetwork.TOGGLE_ACTION);
+            }
         }
         comboWasDown = comboDown;
 
@@ -179,7 +188,10 @@ public final class ArdynSniperClient {
         if (!active) {
             return false;
         }
-        if (clickCount == 1 && localCooldownTicks <= 0 && client.getNetworkHandler() != null) {
+        if (clickCount == 1
+                && localCooldownTicks <= 0
+                && client.getNetworkHandler() != null
+                && ArdynSniperAnimations.canLocalShoot(player.getUuid())) {
             sendAction(ArdynSniperNetwork.SHOOT_ACTION);
         }
         return clickCount > 0;

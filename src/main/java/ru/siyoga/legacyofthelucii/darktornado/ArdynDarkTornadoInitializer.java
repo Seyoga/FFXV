@@ -13,6 +13,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
 import ru.siyoga.legacyofthelucii.LegacyOfTheLucii;
 import ru.siyoga.legacyofthelucii.royalarms.ability.ArdynDarkTornadoAbility;
+import ru.siyoga.legacyofthelucii.royalarms.ability.ArdynSniperAbility;
 
 /** Standalone server entrypoint for Ardyn's Dark Tornado. */
 public final class ArdynDarkTornadoInitializer implements ModInitializer {
@@ -49,6 +50,13 @@ public final class ArdynDarkTornadoInitializer implements ModInitializer {
         } catch (RuntimeException exception) {
             LegacyOfTheLucii.LOGGER.error("{} Malformed packet from {}: no action.",
                     LOG, player.getGameProfile().getName(), exception);
+            return;
+        }
+
+        if (ArdynSniperAbility.isActive(player.getUuid())) {
+            if (action == DarkTornadoNetwork.TOGGLE_TARGETING_ACTION) {
+                server.execute(() -> DarkTornadoNetwork.sendTargetingState(player, false));
+            }
             return;
         }
 

@@ -41,8 +41,10 @@ public final class ArdynSniperInitializer implements ModInitializer {
             }
             return ActionResult.PASS;
         });
-        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) ->
-                ArdynSniperAbility.syncPlayer(handler.player));
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            ArdynSniperAbility.syncPlayer(handler.player);
+            ArdynSniperAbility.syncAnimationsTo(handler.player);
+        });
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
                 ArdynSniperAbility.clearPlayer(handler.player, "disconnect", false));
         ServerPlayerEvents.COPY_FROM.register((oldPlayer, newPlayer, alive) ->
