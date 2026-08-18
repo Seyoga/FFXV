@@ -379,6 +379,7 @@ public final class RoyalArmsAbility {
                         itemPos,
                         cameraPos,
                         playerPos,
+                        itemTime,
                         spinAngle,
                         tickDelta
                 );
@@ -394,6 +395,7 @@ public final class RoyalArmsAbility {
             Vec3d itemPos,
             Vec3d cameraPos,
             Vec3d playerPos,
+            float itemTime,
             float spinAngle,
             float tickDelta
     ) {
@@ -403,6 +405,14 @@ public final class RoyalArmsAbility {
         double dz = itemPos.z - playerPos.z;
         float lookAngle = item.closing ? item.closeLookAngle : (float) Math.toDegrees(Math.atan2(dx, dz));
         float spin = item.closing ? item.closeSpinAngle : (spinAngle + item.spinPhase) % 360.0F;
+        if (!item.closing) {
+            item.lastRenderedTime = itemTime;
+            item.lastRenderedAngle = lookAngle;
+            item.lastRenderedLookAngle = lookAngle;
+            item.lastRenderedSpinAngle = spin;
+            item.lastRenderedRadiusProgress = item.radiusProgress(tickDelta);
+            item.hasRenderedPose = true;
+        }
 
         LegacyPalette palette = LegacyPalette.forLegacy(ClientLuciiState.legacy());
         RenderTint tint = targeted ? palette.targetTint : palette.baseTint;
@@ -504,9 +514,9 @@ public final class RoyalArmsAbility {
                 );
                 double dx = itemPos.x - playerPos.x;
                 double dz = itemPos.z - playerPos.z;
-                float lookAngle = item.closeTicks > 0 ? item.closeLookAngle : (float) Math.toDegrees(Math.atan2(dx, dz));
+                float lookAngle = item.closing ? item.closeLookAngle : (float) Math.toDegrees(Math.atan2(dx, dz));
                 float spinPhase = spinPhaseFor(stack);
-                float spin = item.closeTicks > 0 ? item.closeSpinAngle : item.isTransitioning() ? spinPhase : (spinTime * ITEM_SPIN_SPEED + spinPhase) % 360.0F;
+                float spin = item.closing ? item.closeSpinAngle : item.isTransitioning() ? spinPhase : (spinTime * ITEM_SPIN_SPEED + spinPhase) % 360.0F;
                 item.lastRenderedLookAngle = lookAngle;
                 item.lastRenderedSpinAngle = spin;
                 int seed = (i + 1) * 31 + Registries.ITEM.getId(stack.getItem()).hashCode();
@@ -654,9 +664,11 @@ public final class RoyalArmsAbility {
                 : 0.0F;
         float direction = item.innerTarget ? -ARDYN_INNER_RING_SPEED_MULTIPLIER : 1.0F;
         float normalAnimationAngle = item.angle + time * direction;
-        if (item.closeTicks <= 0 && effectiveGuardProgress <= 0.0F) {
+        if (!item.closing && effectiveGuardProgress <= 0.0F) {
             item.lastRenderedAngle = normalAnimationAngle;
             item.lastRenderedTime = time;
+            item.hasRenderedPose = true;
+            item.lastRenderedRadiusProgress = item.radiusProgress(tickDelta);
             return RoyalArmsOrbitMath.position(
                     playerPos,
                     index,
@@ -669,11 +681,13 @@ public final class RoyalArmsAbility {
         }
 
         float guardAnimationAngle = getGuardRingAngleDegrees(index, total) + time * direction;
-        float animationAngle = item.closeTicks > 0
+        float animationAngle = item.closing
                 ? item.closeAngle
                 : lerpAngleDegrees(normalAnimationAngle, guardAnimationAngle, effectiveGuardProgress);
         item.lastRenderedAngle = animationAngle;
         item.lastRenderedTime = time;
+        item.hasRenderedPose = true;
+        item.lastRenderedRadiusProgress = item.radiusProgress(tickDelta);
 
         double angle = Math.toRadians(animationAngle);
         double normalRingRadius = MathHelper.lerp(
@@ -691,7 +705,7 @@ public final class RoyalArmsAbility {
         double x = Math.sin(angle) * radius;
         double z = Math.cos(angle) * radius;
 
-        float positionTime = item.closeTicks > 0 ? item.closeTime : time;
+        float positionTime = item.closing ? item.closeTime : time;
         double normalY = ORBIT_Y_OFFSET
                 + Math.sin(positionTime * 0.05F + index)
                 * BOB_HEIGHT
@@ -877,6 +891,9 @@ public final class RoyalArmsAbility {
             clearAura();
             return;
         }
+        if (floatingItems.stream().allMatch(item -> item.closing)) {
+            return;
+        }
 
         MinecraftClient client = MinecraftClient.getInstance();
         UUID ownerUuid = client.player == null ? null : client.player.getUuid();
@@ -888,10 +905,19 @@ public final class RoyalArmsAbility {
                     ? 0.0F
                     : currentGuardLayerOffset(ownerUuid, layer)
                     * localGuardFormationProgress;
-            item.closeTime = orbitTime + layerOffset;
-            item.closeAngle = getItemAngle(item, item.closeTime);
-            item.closeLookAngle = item.closeAngle;
-            item.closeSpinAngle = (itemSpinAngle + item.spinPhase) % 360.0F;
+            if (item.hasRenderedPose) {
+                item.closeTime = item.lastRenderedTime;
+                item.closeAngle = item.lastRenderedAngle;
+                item.closeLookAngle = item.lastRenderedLookAngle;
+                item.closeSpinAngle = item.lastRenderedSpinAngle;
+                item.closeStartProgress = item.lastRenderedRadiusProgress;
+            } else {
+                item.closeTime = orbitTime + layerOffset;
+                item.closeAngle = getItemAngle(item, item.closeTime);
+                item.closeLookAngle = item.closeAngle;
+                item.closeSpinAngle = (itemSpinAngle + item.spinPhase) % 360.0F;
+                item.closeStartProgress = item.radiusProgress(0.0F);
+            }
             item.highlightScale = 1.0F;
         }
         targetedItem = null;
@@ -1395,7 +1421,17 @@ public final class RoyalArmsAbility {
         if (!active || legacy == LuciiLegacy.NONE) {
             clearGuardCombatEffects(ownerUuid);
             if (localOwner) {
-                localOrbitSnapshot = RoyalArmsOrbitState.Snapshot.empty(0L);
+                localOrbitSnapshot = snapshot;
+                if (!floatingItems.isEmpty()) {
+                    applyLocalOrbitPrediction(client.world == null
+                            ? snapshot.serverWorldTime()
+                            : client.world.getTime());
+                    for (FloatingItem item : floatingItems) {
+                        // Start recall from the final server pose, not a stale local prediction.
+                        item.hasRenderedPose = false;
+                    }
+                    startClosingAura();
+                }
                 return;
             }
             RemoteRoyalArmsVisual existing = remoteVisuals.get(ownerUuid);
@@ -1404,12 +1440,11 @@ public final class RoyalArmsAbility {
             }
 
             existing.closing = true;
+            existing.snapshot = snapshot;
             for (RemoteFloatingItem item : existing.items) {
-                item.closeTicks = 0;
-                item.closeTime = item.lastRenderedTime;
-                item.closeAngle = item.lastRenderedAngle;
-                item.closeLookAngle = item.lastRenderedLookAngle;
-                item.closeSpinAngle = item.lastRenderedSpinAngle;
+                item.startClosing(snapshot, client.world == null
+                        ? snapshot.serverWorldTime()
+                        : client.world.getTime());
             }
             return;
         }
@@ -1490,7 +1525,7 @@ public final class RoyalArmsAbility {
 
         visual.closing = false;
         for (RemoteFloatingItem item : visual.items) {
-            item.closeTicks = 0;
+            item.cancelClosing();
             item.applyPrediction(
                     visual.snapshot,
                     client.world == null ? visual.snapshot.serverWorldTime() : client.world.getTime()
@@ -1637,9 +1672,16 @@ public final class RoyalArmsAbility {
         private float closeAngle;
         private float closeLookAngle;
         private float closeSpinAngle;
+        private float closeStartProgress = 1.0F;
         private float highlightScale = 1.0F;
         private float innerProgress;
         private boolean innerTarget;
+        private float lastRenderedTime;
+        private float lastRenderedAngle;
+        private float lastRenderedLookAngle;
+        private float lastRenderedSpinAngle;
+        private float lastRenderedRadiusProgress = 1.0F;
+        private boolean hasRenderedPose;
 
         private FloatingItem(String key, int slot, ItemStack stack, float angle, int index) {
             this.key = key;
@@ -1672,10 +1714,12 @@ public final class RoyalArmsAbility {
                     elapsed
             );
             this.innerTarget = slot.innerTarget();
-            this.spawnTicks = Math.min(
+            int authoritativeSpawnTicks = Math.min(
                     APPEAR_TICKS,
                     slot.spawnTicks() + Math.max(0, (int) Math.floor(elapsed))
             );
+            // A late periodic snapshot must not make an already appearing local item shrink.
+            this.spawnTicks = Math.max(this.spawnTicks, authoritativeSpawnTicks);
         }
 
         private float linearAppearanceProgress(float tickDelta) {
@@ -1687,14 +1731,14 @@ public final class RoyalArmsAbility {
 
         private float visualScale(float tickDelta) {
             if (closing) {
-                return Math.max(0.01F, 1.0F - easeInOutCubic(interpolatedCloseTicks(tickDelta) / (float) DISAPPEAR_TICKS));
+                return Math.max(0.01F, closeStartProgress * closeProgress(tickDelta));
             }
             return Math.max(0.01F, easeOutCubic(interpolatedSpawnTicks(tickDelta) / (float) APPEAR_TICKS));
         }
 
         private float radiusProgress(float tickDelta) {
             if (closing) {
-                return Math.max(0.0F, 1.0F - easeInOutCubic(interpolatedCloseTicks(tickDelta) / (float) DISAPPEAR_TICKS));
+                return Math.max(0.0F, closeStartProgress * closeProgress(tickDelta));
             }
             return easeOutCubic(interpolatedSpawnTicks(tickDelta) / (float) APPEAR_TICKS);
         }
@@ -1709,6 +1753,10 @@ public final class RoyalArmsAbility {
 
         private float interpolatedCloseTicks(float tickDelta) {
             return MathHelper.clamp(closeTicks + tickDelta, 0.0F, DISAPPEAR_TICKS);
+        }
+
+        private float closeProgress(float tickDelta) {
+            return 1.0F - easeInOutCubic(interpolatedCloseTicks(tickDelta) / (float) DISAPPEAR_TICKS);
         }
 
         private boolean finishedClosing() {
@@ -1731,8 +1779,12 @@ public final class RoyalArmsAbility {
         private float lastRenderedAngle;
         private float lastRenderedLookAngle;
         private float lastRenderedSpinAngle;
+        private float lastRenderedRadiusProgress = 1.0F;
         private float innerProgress;
         private boolean innerTarget;
+        private boolean closing;
+        private boolean hasRenderedPose;
+        private float closeStartProgress = 1.0F;
 
         private RemoteFloatingItem(RoyalArmsOrbitState.SlotSnapshot slot) {
             this.key = slot.key();
@@ -1743,8 +1795,35 @@ public final class RoyalArmsAbility {
 
         private RemoteFloatingItem update(RoyalArmsOrbitState.SlotSnapshot slot) {
             this.stack = slot.stack().copyWithCount(slot.stack().getCount());
-            this.closeTicks = 0;
+            cancelClosing();
             return this;
+        }
+
+        private void startClosing(RoyalArmsOrbitState.Snapshot snapshot, double worldTime) {
+            applyPrediction(snapshot, worldTime);
+            if (!hasRenderedPose) {
+                float time = (float) predictedPhase(snapshot, worldTime);
+                float direction = innerTarget ? -ARDYN_INNER_RING_SPEED_MULTIPLIER : 1.0F;
+                lastRenderedTime = time;
+                lastRenderedAngle = angle + time * direction;
+                lastRenderedLookAngle = lastRenderedAngle;
+                lastRenderedSpinAngle = (time * ITEM_SPIN_SPEED + spinPhaseFor(stack)) % 360.0F;
+            }
+
+            closing = true;
+            closeTicks = 0;
+            closeTime = lastRenderedTime;
+            closeAngle = lastRenderedAngle;
+            closeLookAngle = lastRenderedLookAngle;
+            closeSpinAngle = lastRenderedSpinAngle;
+            closeStartProgress = hasRenderedPose
+                    ? lastRenderedRadiusProgress
+                    : radiusProgress(0.0F);
+        }
+
+        private void cancelClosing() {
+            closing = false;
+            closeTicks = 0;
         }
 
         private void applyPrediction(RoyalArmsOrbitState.Snapshot snapshot, double worldTime) {
@@ -1764,35 +1843,37 @@ public final class RoyalArmsAbility {
                     elapsed
             );
             this.innerTarget = slot.innerTarget();
-            this.spawnTicks = Math.min(
+            int authoritativeSpawnTicks = Math.min(
                     APPEAR_TICKS,
                     slot.spawnTicks() + Math.max(0, (int) Math.floor(elapsed))
             );
+            // Keep the summon animation monotonic when snapshots arrive with jitter.
+            this.spawnTicks = Math.max(this.spawnTicks, authoritativeSpawnTicks);
         }
 
         private float linearAppearanceProgress(float tickDelta) {
-            if (closeTicks > 0) {
+            if (closing) {
                 return radiusProgress(tickDelta);
             }
             return interpolatedSpawnTicks(tickDelta) / APPEAR_TICKS;
         }
 
         private float visualScale(float tickDelta) {
-            if (closeTicks > 0) {
-                return Math.max(0.01F, 1.0F - easeInOutCubic(interpolatedCloseTicks(tickDelta) / (float) DISAPPEAR_TICKS));
+            if (closing) {
+                return Math.max(0.01F, closeStartProgress * closeProgress(tickDelta));
             }
             return Math.max(0.01F, easeOutCubic(interpolatedSpawnTicks(tickDelta) / (float) APPEAR_TICKS));
         }
 
         private float radiusProgress(float tickDelta) {
-            if (closeTicks > 0) {
-                return Math.max(0.0F, 1.0F - easeInOutCubic(interpolatedCloseTicks(tickDelta) / (float) DISAPPEAR_TICKS));
+            if (closing) {
+                return Math.max(0.0F, closeStartProgress * closeProgress(tickDelta));
             }
             return easeOutCubic(interpolatedSpawnTicks(tickDelta) / (float) APPEAR_TICKS);
         }
 
         private boolean isTransitioning() {
-            return closeTicks > 0 || spawnTicks < APPEAR_TICKS;
+            return closing || spawnTicks < APPEAR_TICKS;
         }
 
         private float interpolatedSpawnTicks(float tickDelta) {
@@ -1803,8 +1884,12 @@ public final class RoyalArmsAbility {
             return MathHelper.clamp(closeTicks + tickDelta, 0.0F, DISAPPEAR_TICKS);
         }
 
+        private float closeProgress(float tickDelta) {
+            return 1.0F - easeInOutCubic(interpolatedCloseTicks(tickDelta) / (float) DISAPPEAR_TICKS);
+        }
+
         private boolean finishedClosing() {
-            return closeTicks >= DISAPPEAR_TICKS;
+            return closing && closeTicks >= DISAPPEAR_TICKS;
         }
     }
 

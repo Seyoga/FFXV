@@ -220,8 +220,15 @@ public final class LegacyOfTheLucii implements ModInitializer {
                     RoyalArmsGuardNetwork.broadcastState(world, player, false);
                 }
             }
-            LuciiNetwork.sendState(player);
-            LuciiNetwork.broadcastRoyalArmsVisual(player);
+            if (!state.royalArmsActive()) {
+                // Send the final server orbit phase before the state sync tells the
+                // client to begin its recall animation.
+                LuciiNetwork.broadcastRoyalArmsVisual(player);
+                LuciiNetwork.sendState(player);
+            } else {
+                LuciiNetwork.sendState(player);
+                LuciiNetwork.broadcastRoyalArmsVisual(player);
+            }
         });
     }
 

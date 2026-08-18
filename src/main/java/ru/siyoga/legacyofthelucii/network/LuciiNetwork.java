@@ -186,13 +186,21 @@ public final class LuciiNetwork {
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeUuid(owner.getUuid());
         buf.writeBoolean(state.royalArmsActive());
+        RoyalArmsOrbitState.Snapshot snapshot = RoyalArmsOrbitDamageAbility.snapshot(owner);
         if (!state.royalArmsActive()) {
+            // The client starts its recall from this exact authoritative orbit pose.
+            writeOrbitMotion(buf, snapshot);
+            writeOrbitSlots(buf, snapshot);
             return buf;
         }
         buf.writeString(state.legacy().id());
         buf.writeVarInt(state.ardynWarpCharges());
-        RoyalArmsOrbitState.Snapshot snapshot = RoyalArmsOrbitDamageAbility.snapshot(owner);
         writeOrbitMotion(buf, snapshot);
+        writeOrbitSlots(buf, snapshot);
+        return buf;
+    }
+
+    private static void writeOrbitSlots(PacketByteBuf buf, RoyalArmsOrbitState.Snapshot snapshot) {
         buf.writeVarInt(snapshot.slots().size());
         for (RoyalArmsOrbitState.SlotSnapshot slot : snapshot.slots()) {
             buf.writeString(slot.key());
@@ -205,7 +213,6 @@ public final class LuciiNetwork {
             buf.writeBoolean(slot.innerTarget());
             buf.writeVarInt(slot.spawnTicks());
         }
-        return buf;
     }
 
     private static void writeOrbitMotion(PacketByteBuf buf, RoyalArmsOrbitState.Snapshot snapshot) {

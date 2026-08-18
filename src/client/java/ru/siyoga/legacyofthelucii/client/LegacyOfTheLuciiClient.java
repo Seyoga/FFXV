@@ -118,11 +118,27 @@ public final class LegacyOfTheLuciiClient implements ClientModInitializer {
                 return;
             }
 
+            RoyalArmsOrbitState.Snapshot motion = readOrbitMotion(buf);
+            int count = buf.readVarInt();
+            List<RoyalArmsOrbitState.SlotSnapshot> slots = new ArrayList<>(count);
+            for (int i = 0; i < count; i++) {
+                slots.add(new RoyalArmsOrbitState.SlotSnapshot(
+                        buf.readString(),
+                        buf.readVarInt(),
+                        buf.readItemStack(),
+                        buf.readVarInt(),
+                        buf.readFloat(),
+                        buf.readFloat(),
+                        buf.readFloat(),
+                        buf.readBoolean(),
+                        buf.readVarInt()
+                ));
+            }
             client.execute(() -> RoyalArmsAbility.updateRemoteVisual(
                     ownerUuid,
                     false,
                     LuciiLegacy.NONE,
-                    RoyalArmsOrbitState.Snapshot.empty(0L),
+                    withSlots(motion, slots),
                     0
             ));
         });
