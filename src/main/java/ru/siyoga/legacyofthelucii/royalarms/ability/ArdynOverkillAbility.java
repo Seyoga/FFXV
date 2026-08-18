@@ -53,6 +53,7 @@ public final class ArdynOverkillAbility {
         }
 
         player.fallDistance = 0.0F;
+        ArdynSniperAbility.clearPlayer(player, "overkill");
         player.getServerWorld().playSound(
                 null,
                 player.getX(),
