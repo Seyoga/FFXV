@@ -10,11 +10,14 @@ import net.fabricmc.fabric.api.networking.v1.PacketSender;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.inventory.SimpleInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.network.PacketByteBuf;
+import net.minecraft.screen.SimpleNamedScreenHandlerFactory;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,12 +42,15 @@ import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsGuardAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsOrbitDamageAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsWallAbility;
 import ru.siyoga.legacyofthelucii.royalarms.ability.RoyalArmsWarpStrikeAbility;
+import ru.siyoga.legacyofthelucii.royalarms.inventory.RoyalArmsScreenHandler;
+import ru.siyoga.legacyofthelucii.royalarms.inventory.RoyalArmsScreenHandlers;
 
 @SuppressWarnings("unused")
 public final class LegacyOfTheLucii implements ModInitializer {
     public static final String MOD_ID = "legacyofthelucii";
     public static final Logger LOGGER = LoggerFactory.getLogger("Legacy of the Lucii");
     public static final Identifier ROYAL_ARMS_EQUIP_PACKET = new Identifier(MOD_ID, "royal_arms_equip");
+    public static final Identifier ROYAL_ARMS_INVENTORY_OPEN_PACKET = new Identifier(MOD_ID, "royal_arms_inventory_open");
 
     @Override
     public void onInitialize() {
@@ -53,8 +59,10 @@ public final class LegacyOfTheLucii implements ModInitializer {
         LegacyStatusEffects.register();
         LegacyParticles.register();
         LegacyItems.register();
+        RoyalArmsScreenHandlers.register();
         MasqueradeNetwork.registerServer();
         ServerPlayNetworking.registerGlobalReceiver(ROYAL_ARMS_EQUIP_PACKET, LegacyOfTheLucii::handleRoyalArmsEquip);
+        ServerPlayNetworking.registerGlobalReceiver(ROYAL_ARMS_INVENTORY_OPEN_PACKET, LegacyOfTheLucii::handleRoyalArmsInventoryOpen);
         ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.ROYAL_ARMS_TOGGLE_PACKET, LegacyOfTheLucii::handleRoyalArmsToggle);
         ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.ROYAL_ARMS_FILTER_PACKET, LegacyOfTheLucii::handleRoyalArmsFilter);
         ServerPlayNetworking.registerGlobalReceiver(LuciiNetwork.ROYAL_ARMS_WALL_PACKET, LegacyOfTheLucii::handleRoyalArmsWall);
@@ -71,15 +79,11 @@ public final class LegacyOfTheLucii implements ModInitializer {
         });
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             LuciiNetwork.sendState(handler.player);
-            // Restore all active forms for the joining client, including its own persisted state.
             ArdynOverkillNetwork.sendAllStates(handler.player);
-            // Existing clients also need the rejoining player's restored state.
             ArdynOverkillNetwork.broadcastState(handler.player);
             RoyalArmsGuardNetwork.sendAllStates(handler.player);
         });
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
-            // This only clears remote client visuals for the absent entity. The server-side
-            // Overkill flag and mana remain in player NBT and resume on the next login.
             ArdynOverkillNetwork.broadcastState(handler.player, false);
             if (handler.player.getWorld() instanceof ServerWorld world) {
                 RoyalArmsGuardNetwork.broadcastState(world, handler.player, false);
@@ -160,9 +164,6 @@ public final class LegacyOfTheLucii implements ModInitializer {
             newState.readNbt(nbt);
 
             if (!alive) {
-                // A real death ends Overkill on BOTH entity instances. Clearing the old
-                // state prevents any late sync from resurrecting the visual flag while the
-                // client is replacing its player entity.
                 oldState.endArdynOverkill();
                 newState.endArdynOverkill();
                 ArdynOverkillNetwork.broadcastState(oldPlayer, false);
@@ -174,9 +175,6 @@ public final class LegacyOfTheLucii implements ModInitializer {
                 newState.endArdynOverkill();
             }
 
-            // AFTER_RESPAWN runs after the replacement ServerPlayerEntity exists. Send the
-            // authoritative state here rather than only from COPY_FROM, which is documented
-            // to run before the respawn is completely finished.
             LuciiNetwork.sendState(newPlayer);
             RoyalArmsGuardAbility.clearAll(newPlayer);
             if (newPlayer.getWorld() instanceof ServerWorld world) {
@@ -185,9 +183,6 @@ public final class LegacyOfTheLucii implements ModInitializer {
             ArdynOverkillNetwork.broadcastState(newPlayer, alive && newState.ardynOverkillActive());
             LuciiNetwork.broadcastRoyalArmsVisual(newPlayer);
 
-            // Queue one duplicate sync for the next server task. This reaches the client
-            // after its local player reference has changed and clears any fake Wither HUD
-            // instance or screen overlay that belonged to the dead entity.
             if (!alive && newPlayer.getServer() != null) {
                 newPlayer.getServer().execute(() -> {
                     if (!newPlayer.isRemoved()) {
@@ -221,14 +216,36 @@ public final class LegacyOfTheLucii implements ModInitializer {
                 }
             }
             if (!state.royalArmsActive()) {
-                // Send the final server orbit phase before the state sync tells the
-                // client to begin its recall animation.
                 LuciiNetwork.broadcastRoyalArmsVisual(player);
                 LuciiNetwork.sendState(player);
             } else {
                 LuciiNetwork.sendState(player);
                 LuciiNetwork.broadcastRoyalArmsVisual(player);
             }
+        });
+    }
+
+    private static void handleRoyalArmsInventoryOpen(
+            net.minecraft.server.MinecraftServer server,
+            ServerPlayerEntity player,
+            net.minecraft.server.network.ServerPlayNetworkHandler handler,
+            PacketByteBuf buf,
+            PacketSender responseSender
+    ) {
+        server.execute(() -> {
+            LuciiPlayerState state = LuciiPlayerStates.get(player);
+            if (!state.hasLegacy()) {
+                player.sendMessage(Text.translatable("message.legacyofthelucii.royal_arms.requires_legacy"), true);
+                return;
+            }
+            player.openHandledScreen(new SimpleNamedScreenHandlerFactory(
+                    (syncId, playerInventory, ignored) -> RoyalArmsScreenHandler.server(
+                            syncId,
+                            playerInventory,
+                            state
+                    ),
+                    Text.translatable("screen.legacyofthelucii.royal_arms.inventory")
+            ));
         });
     }
 
@@ -321,7 +338,6 @@ public final class LegacyOfTheLucii implements ModInitializer {
             PacketSender responseSender
     ) {
         int slot = buf.readVarInt();
-
         server.execute(() -> swapIntoMainHand(player, slot));
     }
 
@@ -330,37 +346,26 @@ public final class LegacyOfTheLucii implements ModInitializer {
         if (!state.hasLegacy() || !state.royalArmsActive()) {
             return;
         }
+        if (slot < 0 || slot >= state.royalArmsUnlockedSlots()) {
+            return;
+        }
+
+        SimpleInventory storage = state.royalArmsInventory();
+        if (slot >= storage.size()) {
+            return;
+        }
+
+        ItemStack targetStack = storage.getStack(slot);
+        if (targetStack.isEmpty() || !state.royalArmsFilter().matches(targetStack)) {
+            return;
+        }
 
         int selectedSlot = player.getInventory().selectedSlot;
-        if (slot == -1) {
-            ItemStack offhandStack = player.getInventory().offHand.get(0);
-            if (offhandStack.isEmpty()) {
-                return;
-            }
-
-            ItemStack heldStack = player.getInventory().getStack(selectedSlot);
-            player.getInventory().setStack(selectedSlot, offhandStack);
-            player.getInventory().offHand.set(0, heldStack);
-            player.currentScreenHandler.sendContentUpdates();
-            return;
-        }
-
-        if (slot < 0 || slot >= player.getInventory().main.size()) {
-            return;
-        }
-
-        if (slot == selectedSlot) {
-            return;
-        }
-
-        ItemStack targetStack = player.getInventory().getStack(slot);
-        if (targetStack.isEmpty()) {
-            return;
-        }
-
         ItemStack heldStack = player.getInventory().getStack(selectedSlot);
         player.getInventory().setStack(selectedSlot, targetStack);
-        player.getInventory().setStack(slot, heldStack);
+        storage.setStack(slot, heldStack);
+        storage.markDirty();
         player.currentScreenHandler.sendContentUpdates();
+        LuciiNetwork.broadcastRoyalArmsVisual(player);
     }
 }

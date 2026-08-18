@@ -1,5 +1,7 @@
 package ru.siyoga.legacyofthelucii.legacy;
 
+import net.minecraft.inventory.SimpleInventory;
+import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtElement;
 import net.minecraft.nbt.NbtList;
@@ -16,6 +18,8 @@ public final class LuciiPlayerState {
     private static final int DEFAULT_MANA_REGEN_INTERVAL = 20;
     private static final int DEFAULT_MANA_REGEN_DELAY = 20 * 5;
     private static final int ARDYN_OVERKILL_MANA_REGEN_INTERVAL = 4;
+    private static final int ROYAL_ARMS_STORAGE_SIZE = 18;
+    private static final int DEFAULT_ROYAL_ARMS_UNLOCKED_SLOTS = 3;
     private static final String MANA_KEY = "Mana";
     private static final String MAX_MANA_KEY = "MaxMana";
     private static final String LEVEL_KEY = "Level";
@@ -23,6 +27,8 @@ public final class LuciiPlayerState {
     private static final String LEGACY_KEY = "Legacy";
     private static final String ROYAL_ARMS_ACTIVE_KEY = "RoyalArmsActive";
     private static final String ROYAL_ARMS_FILTER_KEY = "RoyalArmsFilter";
+    private static final String ROYAL_ARMS_STORAGE_KEY = "RoyalArmsStorage";
+    private static final String ROYAL_ARMS_UNLOCKED_SLOTS_KEY = "RoyalArmsUnlockedSlots";
     private static final String ARDYN_WARP_CHARGES_KEY = "ArdynWarpCharges";
     private static final String ARDYN_OVERKILL_ACTIVE_KEY = "ArdynOverkillActive";
     private static final String REGEN_TIMER_KEY = "ManaRegenTimer";
@@ -49,6 +55,8 @@ public final class LuciiPlayerState {
     private LuciiLegacy legacy = LuciiLegacy.NONE;
     private boolean royalArmsActive;
     private RoyalArmsInventoryFilter royalArmsFilter = RoyalArmsInventoryFilter.ALL;
+    private final SimpleInventory royalArmsInventory = new SimpleInventory(ROYAL_ARMS_STORAGE_SIZE);
+    private int royalArmsUnlockedSlots = DEFAULT_ROYAL_ARMS_UNLOCKED_SLOTS;
     private int ardynWarpCharges;
     private boolean ardynOverkillActive;
     private int regenTimer;
@@ -152,6 +160,22 @@ public final class LuciiPlayerState {
     public RoyalArmsInventoryFilter royalArmsFilter() {
         return royalArmsFilter;
     }
+
+    public SimpleInventory royalArmsInventory() {
+        return royalArmsInventory;
+    }
+
+    public int royalArmsUnlockedSlots() {
+        return royalArmsUnlockedSlots;
+    }
+
+    public void setRoyalArmsUnlockedSlots(int slots) {
+        royalArmsUnlockedSlots = Math.max(
+                DEFAULT_ROYAL_ARMS_UNLOCKED_SLOTS,
+                Math.min(ROYAL_ARMS_STORAGE_SIZE, slots)
+        );
+    }
+
     public int ardynWarpCharges() {
         return ardynWarpCharges;
     }
@@ -278,6 +302,10 @@ public final class LuciiPlayerState {
         legacy = LuciiLegacy.byId(nbt.getString(LEGACY_KEY));
         royalArmsActive = nbt.getBoolean(ROYAL_ARMS_ACTIVE_KEY) && hasLegacy();
         royalArmsFilter = RoyalArmsInventoryFilter.byOrdinal(nbt.getInt(ROYAL_ARMS_FILTER_KEY));
+        setRoyalArmsUnlockedSlots(nbt.contains(ROYAL_ARMS_UNLOCKED_SLOTS_KEY)
+                ? nbt.getInt(ROYAL_ARMS_UNLOCKED_SLOTS_KEY)
+                : DEFAULT_ROYAL_ARMS_UNLOCKED_SLOTS);
+        readRoyalArmsInventory(nbt);
         setArdynWarpCharges(nbt.getInt(ARDYN_WARP_CHARGES_KEY));
         mana = Math.min(Math.max(0, mana), maxMana);
         regenTimer = Math.max(0, nbt.getInt(REGEN_TIMER_KEY));
@@ -306,8 +334,6 @@ public final class LuciiPlayerState {
                     .ifPresent(morph -> activeMorph = unlockedMorphs.get(morph.key()));
         }
 
-        // The selected form is persistent, but the marked observer is a live session target.
-        // Never restore a target UUID after reconnect/respawn/world reload.
         masqueradeTargetUuid = null;
     }
     public void writeNbt(NbtCompound nbt) {
@@ -318,6 +344,8 @@ public final class LuciiPlayerState {
         nbt.putString(LEGACY_KEY, legacy.id());
         nbt.putBoolean(ROYAL_ARMS_ACTIVE_KEY, royalArmsActive);
         nbt.putInt(ROYAL_ARMS_FILTER_KEY, royalArmsFilter.ordinal());
+        nbt.putInt(ROYAL_ARMS_UNLOCKED_SLOTS_KEY, royalArmsUnlockedSlots);
+        writeRoyalArmsInventory(nbt);
         nbt.putInt(ARDYN_WARP_CHARGES_KEY, ardynWarpCharges);
         nbt.putBoolean(ARDYN_OVERKILL_ACTIVE_KEY, ardynOverkillActive);
         nbt.putInt(REGEN_TIMER_KEY, regenTimer);
@@ -333,6 +361,34 @@ public final class LuciiPlayerState {
             nbt.put(MASQUERADE_ACTIVE_KEY, activeMorph.writeNbt());
         }
     }
+
+    private void readRoyalArmsInventory(NbtCompound nbt) {
+        royalArmsInventory.clear();
+        NbtList list = nbt.getList(ROYAL_ARMS_STORAGE_KEY, NbtElement.COMPOUND_TYPE);
+        for (int i = 0; i < list.size(); i++) {
+            NbtCompound itemNbt = list.getCompound(i);
+            int slot = itemNbt.getByte("Slot") & 255;
+            if (slot >= 0 && slot < ROYAL_ARMS_STORAGE_SIZE) {
+                royalArmsInventory.setStack(slot, ItemStack.fromNbt(itemNbt));
+            }
+        }
+    }
+
+    private void writeRoyalArmsInventory(NbtCompound nbt) {
+        NbtList list = new NbtList();
+        for (int slot = 0; slot < ROYAL_ARMS_STORAGE_SIZE; slot++) {
+            ItemStack stack = royalArmsInventory.getStack(slot);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            NbtCompound itemNbt = new NbtCompound();
+            itemNbt.putByte("Slot", (byte) slot);
+            stack.writeNbt(itemNbt);
+            list.add(itemNbt);
+        }
+        nbt.put(ROYAL_ARMS_STORAGE_KEY, list);
+    }
+
     private int experienceForNextLevel() {
         return 50 + (level - 1) * 25;
     }

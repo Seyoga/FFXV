@@ -6,12 +6,15 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
+import net.minecraft.client.gui.screen.ingame.HandledScreens;
 import net.minecraft.client.render.block.entity.BlockEntityRendererFactories;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import ru.siyoga.legacyofthelucii.block.LegacyBlocks;
 import ru.siyoga.legacyofthelucii.client.config.LegacyClientConfig;
+import ru.siyoga.legacyofthelucii.client.gui.royalarms.RoyalArmsInventoryKeybindings;
+import ru.siyoga.legacyofthelucii.client.gui.royalarms.RoyalArmsInventoryScreen;
 import ru.siyoga.legacyofthelucii.client.gui.skilltree.SkillTreeKeybindings;
 import ru.siyoga.legacyofthelucii.client.hud.LuciiHudOverlay;
 import ru.siyoga.legacyofthelucii.client.masquerade.MasqueradeClient;
@@ -35,6 +38,7 @@ import ru.siyoga.legacyofthelucii.legacy.LuciiLegacy;
 import ru.siyoga.legacyofthelucii.network.ArdynOverkillNetwork;
 import ru.siyoga.legacyofthelucii.network.LuciiNetwork;
 import ru.siyoga.legacyofthelucii.network.RoyalArmsGuardNetwork;
+import ru.siyoga.legacyofthelucii.royalarms.inventory.RoyalArmsScreenHandlers;
 import ru.siyoga.legacyofthelucii.royalarms.orbit.RoyalArmsOrbitState;
 
 import java.util.ArrayList;
@@ -45,6 +49,7 @@ public final class LegacyOfTheLuciiClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         LegacyClientConfig.load();
+        HandledScreens.register(RoyalArmsScreenHandlers.ROYAL_ARMS, RoyalArmsInventoryScreen::new);
         ClientPlayNetworking.registerGlobalReceiver(LuciiNetwork.STATE_SYNC_PACKET, (client, handler, buf, responseSender) -> {
             LuciiLegacy legacy = LuciiLegacy.byId(buf.readString());
             int mana = buf.readVarInt();
@@ -61,13 +66,9 @@ public final class LegacyOfTheLuciiClient implements ClientModInitializer {
                         ardynWarpCharges,
                         ardynOverkillActive
                 );
-
-                // Keep the UUID-based map in sync for remote-player rendering, but
-                // local HUD code no longer depends on this transient visual packet.
                 if (client.player != null) {
                     ArdynOverkillClientState.update(client.player.getUuid(), ardynOverkillActive);
                 }
-
                 if (!ardynOverkillActive) {
                     ArdynOverkillClient.clearImmediately(client);
                 }
@@ -79,8 +80,6 @@ public final class LegacyOfTheLuciiClient implements ClientModInitializer {
             client.execute(() -> {
                 ArdynOverkillClientState.update(ownerUuid, active);
                 if (!active && client.player != null && ownerUuid.equals(client.player.getUuid())) {
-                    // A respawn creates a clean player life. Remove the fake Wither HUD
-                    // and screen overlay immediately instead of waiting for their fade/expiry.
                     ArdynOverkillClient.clearImmediately(client);
                 }
             });
@@ -217,9 +216,6 @@ public final class LegacyOfTheLuciiClient implements ClientModInitializer {
             client.execute(() -> RoyalArmsGuardClient.explosion(ownerUuid, itemCount, protection));
         });
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
-            // Clear client-only Wither hearts and the color filter before the old
-            // ClientPlayerEntity is discarded. Otherwise static renderer state can
-            // leak into the next world/session.
             ArdynOverkillClient.reset(client);
             ClientLuciiState.reset();
             ArdynOverkillClientState.reset();
@@ -241,6 +237,7 @@ public final class LegacyOfTheLuciiClient implements ClientModInitializer {
         DemonizationFeatureRenderer.register();
         DemonizedSlimeBallParticle.register();
         SkillTreeKeybindings.register();
+        RoyalArmsInventoryKeybindings.register();
         MasqueradeClient.register();
         MasqueradeTargetMarkerClient.register();
         EntityRendererRegistry.register(LegacyEntities.ARDYN_BARRAGE_WEAPON, ArdynBarrageWeaponRenderer::new);

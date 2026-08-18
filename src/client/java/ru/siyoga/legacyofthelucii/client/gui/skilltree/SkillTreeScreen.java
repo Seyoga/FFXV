@@ -104,8 +104,8 @@ public final class SkillTreeScreen extends Screen {
             renderSkillNode(context, x + PAGE_WIDTH / 2 + 71 + (int) Math.round(scrollX), rowY + 34, Items.WITHER_SKELETON_SKULL.getDefaultStack(), Text.translatable("skill.legacyofthelucii.ardyn.overkill"), mouseX, mouseY);
             renderSkillNode(context, x + PAGE_WIDTH / 2 + 29 + (int) Math.round(scrollX), rowY + 34, Items.FIRE_CHARGE.getDefaultStack(), Text.translatable("skill.legacyofthelucii.ardyn.dark_tornado"), mouseX, mouseY);
             renderSkillNode(context, x + PAGE_WIDTH / 2 - 13 + (int) Math.round(scrollX), rowY + 34, Items.CARVED_PUMPKIN.getDefaultStack(), Text.translatable("skill.legacyofthelucii.ardyn.masquerade"), mouseX, mouseY);
-            return;
             renderSkillNode(context, x + PAGE_WIDTH / 2 - 55 + (int) Math.round(scrollX), rowY + 34, Items.SPYGLASS.getDefaultStack(), Text.translatable("skill.legacyofthelucii.ardyn.cerberus_0"), mouseX, mouseY);
+            return;
         }
         if (ClientLuciiState.legacy() != LuciiLegacy.NOCTIS) return;
         renderSkillNode(context, x + PAGE_WIDTH / 2 - 55 + (int) Math.round(scrollX), rowY, Items.IRON_BLOCK.getDefaultStack(), Text.translatable("skill.legacyofthelucii.noctis.wall"), mouseX, mouseY);
