@@ -41,7 +41,7 @@ public final class ArdynPointWarpClient {
     private static final String CATEGORY = "key.categories.legacyofthelucii";
     private static final Identifier MARKER_TEXTURE = new Identifier(
             LegacyOfTheLucii.MOD_ID,
-            "textures/gui/pointwarp/sprite-0001.png"
+            "textures/gui/pointwarp/ardyn_point_warp.png"
     );
     private static final double MAX_RANGE = 48.0D;
     private static final double MARKER_Y_OFFSET = 0.42D;
@@ -306,7 +306,7 @@ public final class ArdynPointWarpClient {
         return best;
     }
 
-    private static boolean isPointWarpKeyDown(MinecraftClient client) {
+    public static boolean isPointWarpKeyDown(MinecraftClient client) {
         if (pointWarpKey != null && pointWarpKey.isPressed()) {
             return true;
         }

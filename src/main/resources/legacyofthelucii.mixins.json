@@ -13,7 +13,8 @@
     "TargetPredicateMixin",
     "TrackTargetGoalAccessor",
     "TrackTargetGoalMixin",
-    "UntamedActiveTargetGoalMixin"
+    "UntamedActiveTargetGoalMixin",
+    "LuciiPlayerStateSkillMixin"
   ],
   "client": [
     "AbstractBlockStateClientMixin",
@@ -22,7 +23,11 @@
     "LimbAnimatorAccessor",
     "PlayerEntityRendererMixin",
     "LivingEntityClientMixin",
-    "InGameHudMixin"
+    "InGameHudMixin",
+    "MouseScrollMixin",
+    "SkillKeyBindingMixin",
+    "SecretSplashMixin",
+    "MinecraftClientMusicMixin"
   ],
   "injectors": {
     "defaultRequire": 1

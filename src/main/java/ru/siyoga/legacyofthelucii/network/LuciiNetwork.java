@@ -39,6 +39,7 @@ public final class LuciiNetwork {
     public static final Identifier ARDYN_POINT_WARP_VISUAL_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "ardyn_point_warp_visual");
     public static final int ARDYN_POINT_WARP_START_ACTION = 0;
     public static final int ARDYN_POINT_WARP_STOP_ACTION = 1;
+    public static final Identifier NOCTIS_POINT_WARP_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "noctis_point_warp");
     public static final Identifier ROYAL_ARMS_WALL_ANIMATION_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "royal_arms_wall_animation");
     public static final Identifier DEBUG_DEMONIZE_PACKET = new Identifier(LegacyOfTheLucii.MOD_ID, "debug_demonize");
     private LuciiNetwork() {
