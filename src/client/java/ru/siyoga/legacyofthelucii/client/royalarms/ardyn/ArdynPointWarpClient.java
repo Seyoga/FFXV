@@ -190,6 +190,12 @@ public final class ArdynPointWarpClient {
             return false;
         }
 
+        // Do not consume the shared attack callback for Noctis. Its own
+        // point-warp handler is registered after this one.
+        if (!canUse(client)) {
+            return false;
+        }
+
         LegacyOfTheLucii.LOGGER.info("{} LMB callback while X held: clickCount={}, localFlying={}, target={}, eligibility={}.",
                 LOG, clickCount, localFlying, describeTarget(target), eligibilityDescription(client));
 
