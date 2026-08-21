@@ -13,6 +13,7 @@ import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import org.joml.Matrix4f;
 import ru.siyoga.legacyofthelucii.LegacyOfTheLucii;
@@ -26,7 +27,10 @@ import ru.siyoga.legacyofthelucii.skilltree.LuciiSkill;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Client-side discovery and rendering for Noctis high-surface point warp. */
 public final class NoctisPointWarpClient {
@@ -34,15 +38,25 @@ public final class NoctisPointWarpClient {
             LegacyOfTheLucii.MOD_ID,
             "textures/gui/pointwarp/noctis_warp.png"
     );
-    private static final int RESCAN_INTERVAL_TICKS = 4;
-    private static final double MAX_AIM_ANGLE_COS = 0.93D;
+    private static final int RESCAN_INTERVAL_TICKS = 6;
+    private static final double RESCAN_MOVE_DISTANCE_SQUARED = 9.0D;
+    private static final double RESCAN_LOOK_DOT = 0.94D;
+    private static final double GENERATION_CONE_DOT = 0.90D;
+    private static final double MAX_AIM_ANGLE_COS = 0.985D;
+    private static final double RENDER_ZONE_DOT = 0.05D;
+    private static final double CACHE_ZONE_DOT = -0.10D;
+    private static final boolean DEBUG = false;
     private static final float MARKER_SIZE = 0.72F;
     private static final float SELECTED_MARKER_SIZE = 0.94F;
 
     private static List<NoctisWarpPointFinder.WarpPoint> points = List.of();
+    private static final Map<WarpPointKey, NoctisWarpPointFinder.WarpPoint> cachedPoints = new LinkedHashMap<>();
     private static NoctisWarpPointFinder.WarpPoint selected;
     private static int rescanTicks;
     private static int confirmTicks;
+    private static Vec3d lastScanPosition;
+    private static Vec3d lastScanLook;
+    private static boolean hasScan;
     private static boolean registered;
 
     private NoctisPointWarpClient() {
@@ -59,10 +73,14 @@ public final class NoctisPointWarpClient {
     }
 
     public static void clear() {
+        cachedPoints.clear();
         points = List.of();
         selected = null;
         rescanTicks = 0;
         confirmTicks = 0;
+        lastScanPosition = null;
+        lastScanLook = null;
+        hasScan = false;
     }
 
     private static void tick(MinecraftClient client) {
@@ -76,11 +94,68 @@ public final class NoctisPointWarpClient {
             return;
         }
 
-        if (rescanTicks-- <= 0) {
-            points = new ArrayList<>(NoctisWarpPointFinder.find(client.world, client.player.getPos()));
+        Vec3d origin = client.player.getPos();
+        Vec3d look = client.player.getRotationVec(1.0F).normalize();
+        pruneCache(client, origin, look);
+
+        if (shouldRescan(origin, look)) {
+            List<NoctisWarpPointFinder.WarpPoint> freshPoints = NoctisWarpPointFinder.find(
+                    client.world,
+                    origin,
+                    look,
+                    client.player
+            );
+            Vec3d eye = client.player.getEyePos();
+            for (NoctisWarpPointFinder.WarpPoint point : freshPoints) {
+                if (aimDot(eye, look, point.markerPos()) < GENERATION_CONE_DOT) {
+                    continue;
+                }
+                cachedPoints.putIfAbsent(keyOf(point), point);
+            }
+            points = new ArrayList<>(cachedPoints.values());
             rescanTicks = RESCAN_INTERVAL_TICKS;
+            lastScanPosition = origin;
+            lastScanLook = look;
+            hasScan = true;
+            if (DEBUG) {
+                long top = points.stream()
+                        .filter(point -> point.type() == NoctisWarpPointFinder.WarpPointType.TOP)
+                        .count();
+                long ledge = points.size() - top;
+                LegacyOfTheLucii.LOGGER.info(
+                        "[NoctisPointWarp/CLIENT] candidates: TOP={}, LEDGE={}, accepted={}",
+                        top, ledge, points.size()
+                );
+            }
         }
         selected = selectTarget(client);
+    }
+
+    private static boolean shouldRescan(Vec3d origin, Vec3d look) {
+        if (!hasScan || lastScanPosition == null || lastScanLook == null) {
+            return true;
+        }
+        if (rescanTicks > 0) {
+            rescanTicks--;
+            return false;
+        }
+        return origin.squaredDistanceTo(lastScanPosition) >= RESCAN_MOVE_DISTANCE_SQUARED
+                || look.dotProduct(lastScanLook) < RESCAN_LOOK_DOT;
+    }
+
+    private static void pruneCache(MinecraftClient client, Vec3d origin, Vec3d look) {
+        Vec3d eye = client.player.getEyePos();
+        Iterator<Map.Entry<WarpPointKey, NoctisWarpPointFinder.WarpPoint>> iterator = cachedPoints.entrySet().iterator();
+        while (iterator.hasNext()) {
+            NoctisWarpPointFinder.WarpPoint point = iterator.next().getValue();
+            Vec3d toPoint = point.markerPos().subtract(eye);
+            if (toPoint.lengthSquared() > (NoctisWarpPointFinder.MAX_RANGE + 2.0D)
+                    * (NoctisWarpPointFinder.MAX_RANGE + 2.0D)
+                    || look.dotProduct(toPoint.normalize()) < CACHE_ZONE_DOT) {
+                iterator.remove();
+            }
+        }
+        points = new ArrayList<>(cachedPoints.values());
     }
 
     private static boolean onPreAttack(
@@ -98,6 +173,10 @@ public final class NoctisPointWarpClient {
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeBlockPos(selected.blockPos());
         ClientPlayNetworking.send(LuciiNetwork.NOCTIS_POINT_WARP_PACKET, buf);
+        LegacyOfTheLucii.LOGGER.info(
+                "[NoctisPointWarp/CLIENT] START packet sent: block={}",
+                selected.blockPos()
+        );
         confirmTicks = 8;
         selected = null;
         return true;
@@ -133,9 +212,13 @@ public final class NoctisPointWarpClient {
     }
 
     private static void clearTargeting() {
+        cachedPoints.clear();
         points = List.of();
         selected = null;
         rescanTicks = 0;
+        lastScanPosition = null;
+        lastScanLook = null;
+        hasScan = false;
     }
 
     private static void renderMarkers(WorldRenderContext context) {
@@ -151,6 +234,11 @@ public final class NoctisPointWarpClient {
         double time = client.world.getTime() + context.tickDelta();
         VertexConsumer vertices = context.consumers().getBuffer(RenderLayer.getEntityTranslucent(MARKER_TEXTURE));
         for (NoctisWarpPointFinder.WarpPoint point : points) {
+            Vec3d toPoint = point.markerPos().subtract(client.player.getEyePos());
+            if (toPoint.lengthSquared() <= 0.0001D
+                    || client.player.getRotationVec(1.0F).dotProduct(toPoint.normalize()) < RENDER_ZONE_DOT) {
+                continue;
+            }
             boolean isSelected = point.blockPos().equals(selected == null ? null : selected.blockPos());
             float pulse = 0.94F + (float) ((Math.sin(time * 0.28D) + 1.0D) * 0.03D);
             float halfSize = (isSelected ? SELECTED_MARKER_SIZE : MARKER_SIZE) * pulse * 0.5F;
@@ -194,5 +282,16 @@ public final class NoctisPointWarpClient {
     }
 
     private record AimCandidate(NoctisWarpPointFinder.WarpPoint point, double dot) {
+    }
+
+    private static WarpPointKey keyOf(NoctisWarpPointFinder.WarpPoint point) {
+        return new WarpPointKey(point.blockPos(), point.type(), point.outward());
+    }
+
+    private record WarpPointKey(
+            net.minecraft.util.math.BlockPos blockPos,
+            NoctisWarpPointFinder.WarpPointType type,
+            Direction outward
+    ) {
     }
 }
